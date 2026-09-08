@@ -20,6 +20,11 @@ enum Chiptext {
     /// zurückrechnen.
     static let quellbereich = NSAttributedString.Key("textschleuse.quellbereich")
 
+    /// Markiert die Zeichen, die die App dazugeschrieben hat: den Pfeil und
+    /// den Decknamen. Sie gehören nicht zum Originaltext, lassen sich nicht
+    /// bearbeiten und fallen beim Zurückrechnen weg.
+    static let istPlatzhalter = NSAttributedString.Key("textschleuse.istPlatzhalter")
+
     struct Ergebnis {
         var text: NSAttributedString
         /// Wo jeder Fund in der aufgebauten Darstellung liegt. Für Auswahl und
@@ -81,6 +86,10 @@ enum Chiptext {
             attributes: [
                 .font: NSFont.systemFont(ofSize: 13),
                 .foregroundColor: NSColor.labelColor,
+                // Hier ist die Darstellung der Originaltext, Zeichen für
+                // Zeichen. Die Spur muss trotzdem dran sein, sonst findet eine
+                // Markierung ihren Platz im Original nicht.
+                quellbereich: NSValue(range: NSRange(location: 0, length: original.length)),
             ]
         )
 
@@ -177,14 +186,69 @@ enum Chiptext {
             attribute[.underlineColor] = farbe
         }
 
-        let text = NSMutableAttributedString(string: " \(fund.text) ", attributes: attribute)
-        var pfeilAttribute = attribute
-        pfeilAttribute[.foregroundColor] = NSColor.secondaryLabelColor
-        text.append(NSAttributedString(string: "→ ", attributes: pfeilAttribute))
-        var platzhalterAttribute = attribute
-        platzhalterAttribute[.foregroundColor] = farbe.blended(withFraction: 0.35, of: .labelColor) ?? farbe
-        text.append(NSAttributedString(string: "\(fund.platzhalter) ", attributes: platzhalterAttribute))
+        // Drei Stücke: der Originaltext in der Mitte, links und rechts die
+        // Zutat der App. Nur das Mittelstück trägt die Quellspur, nur es
+        // lässt sich bearbeiten.
+        var dekoration = attribute
+        dekoration[istPlatzhalter] = true
+        dekoration[.foregroundColor] = NSColor.secondaryLabelColor
+        dekoration.removeValue(forKey: quellbereich)
+
+        let text = NSMutableAttributedString(string: " ", attributes: dekoration)
+        text.append(NSAttributedString(string: fund.text, attributes: attribute))
+
+        var decknameAttribute = dekoration
+        decknameAttribute[.foregroundColor] = farbe.blended(withFraction: 0.35, of: .labelColor) ?? farbe
+        text.append(NSAttributedString(string: " → ", attributes: dekoration))
+        text.append(NSAttributedString(string: fund.platzhalter, attributes: decknameAttribute))
+        text.append(NSAttributedString(string: " ", attributes: dekoration))
         return text
+    }
+
+    // MARK: Zurückrechnen
+
+    /// Der Originaltext aus einer Darstellung: alles, was die App nicht selbst
+    /// dazugeschrieben hat.
+    static func originaltext(aus anzeige: NSAttributedString) -> String {
+        let ganz = NSRange(location: 0, length: anzeige.length)
+        let roh = anzeige.string as NSString
+        var ergebnis = ""
+        anzeige.enumerateAttribute(istPlatzhalter, in: ganz) { wert, bereich, _ in
+            guard wert == nil else { return }
+            ergebnis += roh.substring(with: bereich)
+        }
+        return ergebnis
+    }
+
+    /// Wie viele Originalzeichen vor dieser Stelle in der Darstellung liegen.
+    static func originalPosition(fuer anzeigePosition: Int, in anzeige: NSAttributedString) -> Int {
+        let bis = min(max(0, anzeigePosition), anzeige.length)
+        guard bis > 0 else { return 0 }
+        var gezaehlt = 0
+        anzeige.enumerateAttribute(istPlatzhalter, in: NSRange(location: 0, length: bis)) { wert, bereich, _ in
+            guard wert == nil else { return }
+            gezaehlt += bereich.length
+        }
+        return gezaehlt
+    }
+
+    /// Der Weg zurück: wo in der Darstellung steht das n-te Originalzeichen?
+    static func anzeigePosition(fuer originalPosition: Int, in anzeige: NSAttributedString) -> Int {
+        var gezaehlt = 0
+        var treffer = anzeige.length
+        anzeige.enumerateAttribute(
+            istPlatzhalter,
+            in: NSRange(location: 0, length: anzeige.length)
+        ) { wert, bereich, weiter in
+            guard wert == nil else { return }
+            if gezaehlt + bereich.length >= originalPosition {
+                treffer = bereich.location + (originalPosition - gezaehlt)
+                weiter.pointee = true
+                return
+            }
+            gezaehlt += bereich.length
+        }
+        return min(treffer, anzeige.length)
     }
 
     // MARK: Stile

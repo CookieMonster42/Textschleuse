@@ -31,6 +31,8 @@ enum Selbsttest {
         fehler += pruefeHauptfenster()
         fehler += pruefeBearbeiten()
         fehler += pruefeSprungZurFundstelle()
+        fehler += pruefeZiffernBeiMarkierung()
+        fehler += pruefeInlineDecknamen()
 
         print("")
         print(fehler == 0 ? "Alles in Ordnung." : "\(fehler) Punkt(e) fehlgeschlagen.")
@@ -709,6 +711,134 @@ enum Selbsttest {
             fehler += 1
         }
         _ = (rolle, textAnsicht)
+        return fehler
+    }
+
+    /// Ziffern müssen zweierlei können: tippen und kategorisieren. Der
+    /// Unterschied ist, ob etwas markiert ist.
+    private static func pruefeZiffernBeiMarkierung() -> Int {
+        var fehler = 0
+        let text = "Das Projekt Nordlicht startet bald."
+        let ansicht = SchutzAnsicht(analyse: Schleuse.analysiere(text, woerterbuch: Woerterbuch()))
+        let fenster = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1000, height: 640),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        fenster.contentView = ansicht
+        fenster.layoutIfNeeded()
+        defer { fenster.orderOut(nil) }
+
+        // Ohne Markierung darf die Ziffer nicht abgefangen werden.
+        if ansicht.tasteFuerPruefung("1") == false {
+            print("✓ Ziffern: ohne Markierung tippt die 1 eine Eins")
+        } else {
+            print("✗ Ziffern: ohne Markierung wird die 1 abgefangen")
+            fehler += 1
+        }
+
+        // Mit Markierung schon.
+        ansicht.markiereFuerPruefung((text as NSString).range(of: "Nordlicht"))
+        let abgefangen = ansicht.tasteFuerPruefung("1")
+        let angelegt = ansicht.analyse.woerterbuch.eintrag(fuerText: "Nordlicht")
+
+        if abgefangen, angelegt?.kategorie == .person {
+            print("✓ Ziffern: mit Markierung legt die 1 eine Person im Wörterbuch an")
+        } else {
+            print("✗ Ziffern: mit Markierung passiert nichts "
+                + "(abgefangen: \(abgefangen), Eintrag: \(angelegt?.kategorie.anzeigename ?? "keiner"))")
+            fehler += 1
+        }
+        return fehler
+    }
+
+    /// Die Chips stehen im Text, der Text bleibt trotzdem bearbeitbar. Das
+    /// steht und fällt damit, dass sich der Originaltext exakt aus der
+    /// Anzeige zurückgewinnen lässt.
+    private static func pruefeInlineDecknamen() -> Int {
+        var fehler = 0
+        let text = "Sehr geehrter Herr Nyström, Rückfragen an a@b.de oder 0621 1234567."
+        var analyse = Schleuse.analysiere(text, woerterbuch: Woerterbuch())
+
+        let anzeige = Chiptext.aufbauen(analyse: analyse, ausgewaehlt: nil).text
+        let zurueck = Chiptext.originaltext(aus: anzeige)
+        if zurueck == text {
+            print("✓ Inline: der Originaltext lässt sich aus der Anzeige zurückgewinnen")
+        } else {
+            print("✗ Inline: zurückgewonnen kam „\(zurueck)\" statt „\(text)\"")
+            fehler += 1
+        }
+
+        // Die Anzeige ist länger als das Original — sonst stünde nichts drin.
+        if anzeige.length > (text as NSString).length {
+            print("✓ Inline: die Decknamen stehen wirklich im Text "
+                + "(\(anzeige.length) statt \(( text as NSString).length) Zeichen)")
+        } else {
+            print("✗ Inline: in der Anzeige steht kein Deckname")
+            fehler += 1
+        }
+
+        // Die Schreibmarke muss durch beide Richtungen unverändert kommen.
+        var markenStimmen = true
+        for stelle in [0, 5, 20, (text as NSString).length] {
+            let inAnzeige = Chiptext.anzeigePosition(fuer: stelle, in: anzeige)
+            if Chiptext.originalPosition(fuer: inAnzeige, in: anzeige) != stelle { markenStimmen = false }
+        }
+        if markenStimmen {
+            print("✓ Inline: die Schreibmarke übersteht das Hin und Her")
+        } else {
+            print("✗ Inline: die Schreibmarke verrutscht beim Umrechnen")
+            fehler += 1
+        }
+
+        // Und jetzt in der echten Ansicht: Decknamen gesperrt, Text frei.
+        let ansicht = SchutzAnsicht(analyse: analyse)
+        let fenster = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1000, height: 640),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        fenster.contentView = ansicht
+        fenster.layoutIfNeeded()
+        defer { fenster.orderOut(nil) }
+
+        // Eine Stelle mitten im Deckname suchen.
+        let aufbau = Chiptext.aufbauen(analyse: analyse, ausgewaehlt: nil).text
+        var imDeckname: Int?
+        aufbau.enumerateAttribute(
+            Chiptext.istPlatzhalter,
+            in: NSRange(location: 0, length: aufbau.length)
+        ) { wert, bereich, weiter in
+            if wert != nil, bereich.length > 3 {
+                imDeckname = bereich.location + 2
+                weiter.pointee = true
+            }
+        }
+
+        if let imDeckname, !ansicht.darfAendernFuerPruefung(NSRange(location: imDeckname, length: 1)) {
+            print("✓ Inline: im Deckname lässt sich nichts ändern")
+        } else {
+            print("✗ Inline: der Deckname ist bearbeitbar")
+            fehler += 1
+        }
+        if ansicht.darfAendernFuerPruefung(NSRange(location: 2, length: 1)) {
+            print("✓ Inline: im Originaltext lässt sich ändern")
+        } else {
+            print("✗ Inline: der Originaltext ist gesperrt")
+            fehler += 1
+        }
+
+        // Tippen und zurückrechnen im Zusammenspiel.
+        _ = analyse
+        ansicht.setzeTextFuerPruefung("Frau Weidenbach, Tel. 0621 1234567.")
+        if ansicht.analyse.original == "Frau Weidenbach, Tel. 0621 1234567." {
+            print("✓ Inline: getippter Text kommt sauber im Original an")
+        } else {
+            print("✗ Inline: im Original steht „\(ansicht.analyse.original)\"")
+            fehler += 1
+        }
         return fehler
     }
 
