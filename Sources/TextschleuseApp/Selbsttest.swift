@@ -129,6 +129,24 @@ enum Selbsttest {
             fehler += 1
         }
 
+        // Stehen Text und Liste nebeneinander, oder ist eins von beiden
+        // hinter dem anderen verschwunden?
+        if let flaeche, let tabellenRolle = tabelle?.enclosingScrollView {
+            let links = inhalt.convert(flaeche.bounds, from: flaeche)
+            let rechts = inhalt.convert(tabellenRolle.bounds, from: tabellenRolle)
+            let nebeneinander = links.maxX <= rechts.minX + 1
+            let beideBreit = links.width > 200 && rechts.width > 120
+            if nebeneinander && beideBreit {
+                print("✓ Aufbau: Text links (\(Int(links.width)) pt), Liste rechts (\(Int(rechts.width)) pt)")
+            } else {
+                print("✗ Aufbau: Text \(NSStringFromRect(links)), Liste \(NSStringFromRect(rechts))")
+                fehler += 1
+            }
+        } else {
+            print("✗ Aufbau: Textfläche oder Liste nicht gefunden")
+            fehler += 1
+        }
+
         // Sitzt der Inhalt tatsächlich im Fenster oder ist er in eine Ecke
         // zusammengefallen?
         let fensterflaeche = popup.frame.width * popup.frame.height
@@ -143,7 +161,49 @@ enum Selbsttest {
         }
 
         popup.orderOut(nil)
+        fehler += pruefeLeerzustand()
         return fehler
+    }
+
+    /// Ohne Fundstellen und ohne Text muss das Fenster trotzdem stehen und
+    /// etwas sagen. Vorher hat es sich in diesem Fall selbst geschlossen, was
+    /// aussah, als sei der Kurzbefehl nicht angekommen.
+    private static func pruefeLeerzustand() -> Int {
+        var fehler = 0
+        for (name, text) in [("nichts erkannt", "Ein völlig harmloser Satz."), ("kein Text", "")] {
+            let analyse = Schleuse.analysiere(text, woerterbuch: Woerterbuch())
+            guard analyse.funde.isEmpty else {
+                print("✗ Leerzustand (\(name)): der Probetext hat doch Fundstellen")
+                fehler += 1
+                continue
+            }
+
+            let popup = SchutzPopup(analyse: analyse) { _ in }
+            popup.layoutIfNeeded()
+            let inhalt = popup.contentView
+            let kopf = beschriftungenSammeln(in: inhalt).filter { !$0.isEmpty }
+
+            if let inhalt, inhalt.frame.width > 400, !kopf.isEmpty {
+                print("✓ Leerzustand (\(name)): Fenster steht, Kopfzeile sagt „\(kopf[0])\"")
+            } else {
+                print("✗ Leerzustand (\(name)): Fenster leer oder zu klein")
+                fehler += 1
+            }
+            popup.orderOut(nil)
+        }
+        return fehler
+    }
+
+    private static func beschriftungenSammeln(in ansicht: NSView?) -> [String] {
+        guard let ansicht else { return [] }
+        var gefunden: [String] = []
+        if let feld = ansicht as? NSTextField, !feld.isEditable, !feld.stringValue.isEmpty {
+            gefunden.append(feld.stringValue)
+        }
+        for unter in ansicht.subviews {
+            gefunden += beschriftungenSammeln(in: unter)
+        }
+        return gefunden
     }
 
     /// Die Darstellung ist nicht der Originaltext: Chips schieben Platzhalter
