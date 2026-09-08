@@ -16,7 +16,11 @@ final class Hauptfenster: NSWindowController {
     private let woerterbuch: () -> Woerterbuch
     private let beimSchuetzen: (Analyse, Bool) -> Void
     private let beimZurueckdrehen: (String) -> Void
-    private let sitzungsZuordnung: () -> [String: String]
+    /// Die Texte dieser Sitzung. Geteilt mit den Popups, damit beide Wege
+    /// denselben Stand sehen.
+    private let sitzung: Sitzung
+    /// Der Vorgang, an dem dieses Fenster gerade arbeitet.
+    private var laufenderVorgang: UUID?
 
     private let reiter = NSTabView()
     private var schutzAnsicht: SchutzAnsicht?
@@ -32,21 +36,26 @@ final class Hauptfenster: NSWindowController {
     )
     private let schutzBehaelter = NSView()
     private let rueckwegBehaelter = NSView()
+    private let verlaufWahl = NSPopUpButton()
+    private let verlaufEtikett = NSTextField(labelWithString: "Zuletzt bearbeitet")
 
     static func zeige(
         woerterbuch: @escaping () -> Woerterbuch,
-        sitzungsZuordnung: @escaping () -> [String: String],
+        sitzung: Sitzung,
         beimSchuetzen: @escaping (Analyse, Bool) -> Void,
         beimZurueckdrehen: @escaping (String) -> Void
     ) {
         if let vorhandenes = offen {
+            // Beim Wiederaufmachen den neuesten Stand zeigen — womöglich hat
+            // seither jemand im Popup gearbeitet.
+            vorhandenes.zeigeNeuesten()
             vorhandenes.window?.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
         let fenster = Hauptfenster(
             woerterbuch: woerterbuch,
-            sitzungsZuordnung: sitzungsZuordnung,
+            sitzung: sitzung,
             beimSchuetzen: beimSchuetzen,
             beimZurueckdrehen: beimZurueckdrehen
         )
@@ -58,12 +67,12 @@ final class Hauptfenster: NSWindowController {
 
     init(
         woerterbuch: @escaping () -> Woerterbuch,
-        sitzungsZuordnung: @escaping () -> [String: String],
+        sitzung: Sitzung,
         beimSchuetzen: @escaping (Analyse, Bool) -> Void,
         beimZurueckdrehen: @escaping (String) -> Void
     ) {
         self.woerterbuch = woerterbuch
-        self.sitzungsZuordnung = sitzungsZuordnung
+        self.sitzung = sitzung
         self.beimSchuetzen = beimSchuetzen
         self.beimZurueckdrehen = beimZurueckdrehen
 
@@ -80,6 +89,7 @@ final class Hauptfenster: NSWindowController {
 
         fenster.delegate = self
         baueOberflaeche()
+        zeigeNeuesten()
     }
 
     @available(*, unavailable)
@@ -115,10 +125,26 @@ final class Hauptfenster: NSWindowController {
         reiter.addTabViewItem(zurueck)
         reiter.translatesAutoresizingMaskIntoConstraints = false
 
+        verlaufEtikett.font = .systemFont(ofSize: 11)
+        verlaufEtikett.textColor = .secondaryLabelColor
+        verlaufWahl.target = self
+        verlaufWahl.action = #selector(verlaufGewaehlt)
+        verlaufWahl.toolTip = "Die Texte dieser Sitzung. Nach dem Beenden sind sie weg."
+
+        let verlaufZeile = NSStackView(views: [verlaufEtikett, verlaufWahl])
+        verlaufZeile.orientation = .horizontal
+        verlaufZeile.spacing = 8
+        verlaufZeile.translatesAutoresizingMaskIntoConstraints = false
+
         let inhalt = NSView()
+        inhalt.addSubview(verlaufZeile)
         inhalt.addSubview(reiter)
         NSLayoutConstraint.activate([
-            reiter.topAnchor.constraint(equalTo: inhalt.topAnchor, constant: 12),
+            verlaufZeile.topAnchor.constraint(equalTo: inhalt.topAnchor, constant: 12),
+            verlaufZeile.leadingAnchor.constraint(equalTo: inhalt.leadingAnchor, constant: 12),
+            verlaufZeile.trailingAnchor.constraint(lessThanOrEqualTo: inhalt.trailingAnchor, constant: -12),
+            verlaufWahl.widthAnchor.constraint(greaterThanOrEqualToConstant: 420),
+            reiter.topAnchor.constraint(equalTo: verlaufZeile.bottomAnchor, constant: 10),
             reiter.leadingAnchor.constraint(equalTo: inhalt.leadingAnchor, constant: 12),
             reiter.trailingAnchor.constraint(equalTo: inhalt.trailingAnchor, constant: -12),
             reiter.bottomAnchor.constraint(equalTo: inhalt.bottomAnchor, constant: -12),
@@ -140,6 +166,15 @@ final class Hauptfenster: NSWindowController {
         pruefe(text)
     }
 
+    /// Holt den neuesten Vorgang der Sitzung ins Fenster. Ohne das säße hier
+    /// noch der Text von vorhin, während im Popup längst ein anderer läuft.
+    func zeigeNeuesten() {
+        aktualisiereVerlauf()
+        guard let neuester = sitzung.neuester else { return }
+        laufenderVorgang = neuester.id
+        zeigeAnalyse(neuester.analyse)
+    }
+
     private func pruefe(_ text: String) {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             schutzEingabe.melde("Da ist kein Text.")
@@ -147,6 +182,12 @@ final class Hauptfenster: NSWindowController {
         }
 
         let analyse = Schleuse.analysiere(text, woerterbuch: woerterbuch())
+        laufenderVorgang = sitzung.beginne(analyse)
+        zeigeAnalyse(analyse)
+        aktualisiereVerlauf()
+    }
+
+    private func zeigeAnalyse(_ analyse: Analyse) {
         if let vorhanden = schutzAnsicht {
             vorhanden.setze(analyse: analyse)
         } else {
@@ -156,10 +197,51 @@ final class Hauptfenster: NSWindowController {
                 self?.schutzEingabe.melde("In die Zwischenablage gelegt. Jetzt im KI-Tool einfügen.")
             }
             ansicht.beiAbbruch = { [weak self] in self?.zurueckZurEingabe() }
+            ansicht.beiAenderung = { [weak self] stand in
+                guard let self, let kennung = self.laufenderVorgang else { return }
+                self.sitzung.aktualisiere(kennung, mit: stand)
+                self.aktualisiereVerlauf()
+            }
             schutzAnsicht = ansicht
         }
         zeige(schutzAnsicht, in: schutzBehaelter, statt: schutzEingabe)
         window?.makeFirstResponder(schutzAnsicht)
+    }
+
+    // MARK: Verlauf
+
+    private func aktualisiereVerlauf() {
+        let format = DateFormatter()
+        format.dateStyle = .none
+        format.timeStyle = .short
+
+        verlaufWahl.removeAllItems()
+        for vorgang in sitzung.vorgaenge {
+            verlaufWahl.addItem(withTitle: "\(format.string(from: vorgang.zeitpunkt))  ·  \(vorgang.vorschau)")
+            verlaufWahl.lastItem?.representedObject = vorgang.id
+        }
+        if sitzung.vorgaenge.isEmpty {
+            verlaufWahl.addItem(withTitle: "Noch nichts bearbeitet")
+        }
+        verlaufWahl.isEnabled = !sitzung.vorgaenge.isEmpty
+        verlaufEtikett.stringValue = sitzung.vorgaenge.count > 1
+            ? "Diese Sitzung (\(sitzung.vorgaenge.count))"
+            : "Diese Sitzung"
+
+        if let laufenderVorgang,
+           let index = sitzung.vorgaenge.firstIndex(where: { $0.id == laufenderVorgang }) {
+            verlaufWahl.selectItem(at: index)
+        }
+    }
+
+    @objc private func verlaufGewaehlt() {
+        guard let kennung = verlaufWahl.selectedItem?.representedObject as? UUID,
+              kennung != laufenderVorgang,
+              let vorgang = sitzung.vorgang(kennung)
+        else { return }
+        reiter.selectTabViewItem(at: 0)
+        laufenderVorgang = kennung
+        zeigeAnalyse(vorgang.analyse)
     }
 
     private func zurueckZurEingabe() {
@@ -178,7 +260,7 @@ final class Hauptfenster: NSWindowController {
         let ergebnis = Rueckweg.analysiere(
             text,
             woerterbuch: woerterbuch(),
-            unbekannte: sitzungsZuordnung()
+            unbekannte: sitzung.unbekannte
         )
         if let vorhanden = rueckwegAnsicht {
             vorhanden.setze(ergebnis: ergebnis)
@@ -186,7 +268,7 @@ final class Hauptfenster: NSWindowController {
             let ansicht = RueckwegAnsicht(
                 ergebnis: ergebnis,
                 woerterbuch: woerterbuch(),
-                unbekannte: sitzungsZuordnung()
+                unbekannte: sitzung.unbekannte
             )
             ansicht.beiUebernahme = { [weak self] fertig in
                 self?.beimZurueckdrehen(fertig)

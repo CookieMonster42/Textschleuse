@@ -34,6 +34,7 @@ enum Selbsttest {
         fehler += pruefeZiffernBeiMarkierung()
         fehler += pruefeInlineDecknamen()
         fehler += pruefeWiderruf()
+        fehler += pruefeSitzung()
 
         print("")
         print(fehler == 0 ? "Alles in Ordnung." : "\(fehler) Punkt(e) fehlgeschlagen.")
@@ -528,7 +529,7 @@ enum Selbsttest {
 
         let fenster = Hauptfenster(
             woerterbuch: { buch },
-            sitzungsZuordnung: { [:] },
+            sitzung: Sitzung(),
             beimSchuetzen: { analyse, _ in gesichert = analyse },
             beimZurueckdrehen: { _ in }
         )
@@ -897,6 +898,81 @@ enum Selbsttest {
             print("✓ Widerruf: auch getippter Text geht zurück")
         } else {
             print("✗ Widerruf: nach dem Zurücknehmen steht „\(ansicht.analyse.original)\"")
+            fehler += 1
+        }
+        return fehler
+    }
+
+    /// Der Sitzungsverlauf: mehrere Texte, nichts auf der Platte, und das
+    /// Hauptfenster sieht, was im Popup passiert ist.
+    private static func pruefeSitzung() -> Int {
+        var fehler = 0
+        let sitzung = Sitzung()
+
+        let ersterText = "Herr Nyström rief an."
+        let zweiterText = "Frau Weidenbach schrieb, Tel. 0621 1234567."
+        let ersteKennung = sitzung.beginne(Schleuse.analysiere(ersterText, woerterbuch: Woerterbuch()))
+        sitzung.beginne(Schleuse.analysiere(zweiterText, woerterbuch: Woerterbuch()))
+
+        if sitzung.vorgaenge.count == 2, sitzung.neuester?.analyse.original == zweiterText {
+            print("✓ Sitzung: zwei Texte behalten, der neueste steht vorn")
+        } else {
+            print("✗ Sitzung: \(sitzung.vorgaenge.count) Texte, vorn steht "
+                + "„\(sitzung.neuester?.analyse.original ?? "nichts")\"")
+            fehler += 1
+        }
+
+        // Ein älterer Vorgang, der fortgeschrieben wird, rutscht nach vorn.
+        var ersteAnalyse = Schleuse.analysiere(ersterText, woerterbuch: Woerterbuch())
+        Schleuse.markiere(
+            bereich: (ersterText as NSString).range(of: "Nyström"),
+            als: .person,
+            merken: false,
+            in: &ersteAnalyse
+        )
+        sitzung.aktualisiere(ersteKennung, mit: ersteAnalyse)
+        if sitzung.neuester?.id == ersteKennung {
+            print("✓ Sitzung: der fortgeschriebene Text rutscht nach vorn")
+        } else {
+            print("✗ Sitzung: die Reihenfolge stimmt nicht")
+            fehler += 1
+        }
+
+        // Sitzungsplatzhalter sammeln sich, statt sich zu ersetzen.
+        if !sitzung.unbekannte.isEmpty,
+           sitzung.unbekannte.values.contains("Nyström") {
+            print("✓ Sitzung: die Sitzungsplatzhalter bleiben erhalten")
+        } else {
+            print("✗ Sitzung: die Sitzungsplatzhalter fehlen")
+            fehler += 1
+        }
+
+        // Die Obergrenze greift.
+        for nummer in 0..<Sitzung.hoechstzahl + 5 {
+            sitzung.beginne(Schleuse.analysiere("Text \(nummer)", woerterbuch: Woerterbuch()))
+        }
+        if sitzung.vorgaenge.count == Sitzung.hoechstzahl {
+            print("✓ Sitzung: höchstens \(Sitzung.hoechstzahl) Texte, ältere fallen raus")
+        } else {
+            print("✗ Sitzung: \(sitzung.vorgaenge.count) Texte trotz Obergrenze")
+            fehler += 1
+        }
+
+        // Und das Fenster zeigt den neuesten, nicht irgendeinen.
+        let fenster = Hauptfenster(
+            woerterbuch: { Woerterbuch() },
+            sitzung: sitzung,
+            beimSchuetzen: { _, _ in },
+            beimZurueckdrehen: { _ in }
+        )
+        fenster.window?.layoutIfNeeded()
+        defer { fenster.close() }
+
+        let gezeigt = fenster.window?.contentView.flatMap { schutzflaecheSuchen(in: $0) }
+        if gezeigt?.analyse.original == sitzung.neuester?.analyse.original {
+            print("✓ Sitzung: das Hauptfenster öffnet mit dem neuesten Text")
+        } else {
+            print("✗ Sitzung: das Hauptfenster zeigt „\(gezeigt?.analyse.original ?? "nichts")\"")
             fehler += 1
         }
         return fehler

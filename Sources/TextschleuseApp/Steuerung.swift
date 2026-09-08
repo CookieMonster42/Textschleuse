@@ -9,9 +9,9 @@ final class Steuerung: NSObject, NSApplicationDelegate {
     private let speicher = Speicher()
     private var woerterbuch = Woerterbuch()
 
-    /// Die Zuordnung `UNBEKANNT_n` → Klartext des letzten Vorgangs. Nur im
-    /// Arbeitsspeicher, damit nach dem Beenden nichts zurückbleibt.
-    private var letzteUnbekannte: [String: String] = [:]
+    /// Die Texte dieser Sitzung. Nur im Arbeitsspeicher — dauerhaft
+    /// gespeichert wird allein das Wörterbuch.
+    private let sitzung = Sitzung()
 
     private var offenesPopup: NSWindow?
 
@@ -157,7 +157,7 @@ final class Steuerung: NSObject, NSApplicationDelegate {
     @objc func zeigeHauptfenster() {
         Hauptfenster.zeige(
             woerterbuch: { [weak self] in self?.woerterbuch ?? Woerterbuch() },
-            sitzungsZuordnung: { [weak self] in self?.letzteUnbekannte ?? [:] },
+            sitzung: sitzung,
             beimSchuetzen: { [weak self] analyse, merken in
                 self?.uebernimmSchutz(analyse, merken: merken)
             },
@@ -274,10 +274,16 @@ final class Steuerung: NSObject, NSApplicationDelegate {
         // angekommen ist — und nimmt dir die Möglichkeit, selbst zu markieren.
         let analyse = Schleuse.analysiere(Zwischenablage.lies() ?? "", woerterbuch: woerterbuch)
 
+        // Der Vorgang steht ab jetzt in der Sitzung, auch wenn nie kopiert
+        // wird. Das Hauptfenster zeigt damit, was hier gerade passiert.
+        let kennung = sitzung.beginne(analyse)
         let popup = SchutzPopup(analyse: analyse) { [weak self] ausgang in
             self?.offenesPopup = nil
             guard case .uebernommen(let fertig, let merken) = ausgang else { return }
             self?.uebernimmSchutz(fertig, merken: merken)
+        }
+        popup.beiAenderung = { [weak self] stand in
+            self?.sitzung.aktualisiere(kennung, mit: stand)
         }
         offenesPopup = popup
         popup.zeige()
@@ -295,7 +301,11 @@ final class Steuerung: NSObject, NSApplicationDelegate {
 
         let hatDateiVorher = speicher.hatDatei
         woerterbuch = endstand.woerterbuch
-        letzteUnbekannte = endstand.unbekannte
+        if let laufender = sitzung.neuester?.id {
+            sitzung.aktualisiere(laufender, mit: endstand)
+        } else {
+            sitzung.beginne(endstand)
+        }
 
         Zwischenablage.schreib(Schleuse.fuerZwischenablage(
             endstand,
@@ -319,13 +329,13 @@ final class Steuerung: NSObject, NSApplicationDelegate {
         let ergebnis = Rueckweg.analysiere(
             Zwischenablage.lies() ?? "",
             woerterbuch: woerterbuch,
-            unbekannte: letzteUnbekannte
+            unbekannte: sitzung.unbekannte
         )
 
         let popup = RueckwegPopup(
             ergebnis: ergebnis,
             woerterbuch: woerterbuch,
-            unbekannte: letzteUnbekannte
+            unbekannte: sitzung.unbekannte
         ) { [weak self] ausgang in
             self?.offenesPopup = nil
             guard case .uebernommen(let fertig) = ausgang else { return }
