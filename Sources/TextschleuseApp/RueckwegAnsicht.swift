@@ -4,7 +4,7 @@ import TextschleuseCore
 /// Die Arbeitsfläche für den Rückweg. Gleicher Aufbau wie beim Schützen:
 /// links der Text, rechts die Liste. Nur andersherum — grün heißt auflösbar,
 /// rot heißt, das Wörterbuch kennt den Platzhalter nicht.
-final class RueckwegAnsicht: NSView {
+final class RueckwegAnsicht: NSView, NSUserInterfaceValidations {
 
     var beiUebernahme: ((String) -> Void)?
     var beiAbbruch: (() -> Void)?
@@ -98,7 +98,20 @@ final class RueckwegAnsicht: NSView {
         anlegen.toolTip = "Legt den Klartext im Wörterbuch an und bindet den Platzhalter daran."
         let neu = NSButton(title: "Neuer Text (⌘N)", target: self, action: #selector(neuEinlesen))
         neu.toolTip = "Liest, was jetzt in der Zwischenablage liegt."
-        for knopf in [zuordnen, anlegen, neu] {
+        let kopieren = NSButton(title: "Ergebnis kopieren", target: self, action: #selector(aktionKopieren(_:)))
+        kopieren.keyEquivalent = "\r"
+        kopieren.toolTip = "⏎ macht dasselbe"
+        kopieren.bezelStyle = .rounded
+        knopfleiste.addArrangedSubview(kopieren)
+
+        let zurueckKnopf = NSButton(title: "↑", target: self, action: #selector(aktionVorigeFundstelle(_:)))
+        zurueckKnopf.toolTip = "Voriger Platzhalter (↑)"
+        let vorKnopf = NSButton(title: "↓", target: self, action: #selector(aktionNaechsteFundstelle(_:)))
+        vorKnopf.toolTip = "Nächster Platzhalter (↓)"
+        let suchKnopf = NSButton(title: "Suchen", target: self, action: #selector(aktionSuchen(_:)))
+        suchKnopf.toolTip = "Im Text suchen (⌘F)"
+
+        for knopf in [zurueckKnopf, vorKnopf, suchKnopf, zuordnen, anlegen, neu] {
             knopf.bezelStyle = .rounded
             knopf.controlSize = .small
             knopfleiste.addArrangedSubview(knopf)
@@ -195,6 +208,38 @@ final class RueckwegAnsicht: NSView {
         let sortiert = ergebnis.funde.sorted { $0.bereich.location < $1.bereich.location }
         guard sortiert.indices.contains(auswahl) else { return nil }
         return sortiert[auswahl]
+    }
+
+    // MARK: Tasten und Menü
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func keyDown(with ereignis: NSEvent) {
+        if verarbeite(ereignis) { return }
+        super.keyDown(with: ereignis)
+    }
+
+    @objc func aktionKopieren(_ absender: Any?) { beiUebernahme?(ergebnis.ergebnis) }
+    @objc func aktionNeuerText(_ absender: Any?) { neuEinlesen() }
+    @objc func aktionSuchen(_ absender: Any?) { suche.oeffne() }
+    @objc func aktionNaechsteFundstelle(_ absender: Any?) { waehle(auswahl + 1) }
+    @objc func aktionVorigeFundstelle(_ absender: Any?) { waehle(auswahl - 1) }
+    @objc func aktionZuordnen(_ absender: Any?) { zuordnen() }
+    @objc func aktionNeuerEintrag(_ absender: Any?) { neuAnlegen() }
+
+    func validateUserInterfaceItem(_ eintrag: NSValidatedUserInterfaceItem) -> Bool {
+        switch eintrag.action {
+        case #selector(aktionZuordnen(_:)):
+            return aktuellerFund?.istAufloesbar == false && !woerterbuch.eintraege.isEmpty
+        case #selector(aktionNeuerEintrag(_:)):
+            return aktuellerFund?.istAufloesbar == false
+        case #selector(aktionNaechsteFundstelle(_:)), #selector(aktionVorigeFundstelle(_:)):
+            return !ergebnis.funde.isEmpty
+        case #selector(aktionKopieren(_:)):
+            return !ergebnis.original.isEmpty
+        default:
+            return true
+        }
     }
 
     // MARK: Zuordnen

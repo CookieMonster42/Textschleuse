@@ -214,6 +214,8 @@ final class Steuerung: NSObject, NSApplicationDelegate {
         ablage.submenu = ablageMenue
         leiste.addItem(ablage)
 
+        leiste.addItem(baueAktionenmenue())
+
         // Ohne dieses Menü gibt es kein Einfügen per Tastatur. AppKit hängt
         // die Befehle an die Menüeinträge, nicht an die Textfelder.
         let bearbeiten = NSMenuItem()
@@ -246,6 +248,96 @@ final class Steuerung: NSObject, NSApplicationDelegate {
 
         NSApp.mainMenu = leiste
         NSApp.windowsMenu = fensterMenue
+    }
+
+    /// Alles, was in den Arbeitsflächen geht, auch als Menüpunkt.
+    ///
+    /// Ohne Ziel eingetragen: der Befehl wandert die Antwortkette hinunter zu
+    /// der Ansicht, die gerade vorn ist. Das ist der Grund, warum die
+    /// Kurzbefehle jetzt auch dann greifen, wenn der Fokus auf einem Knopf
+    /// oder in der Liste sitzt — vorher hörte nur das Textfeld zu.
+    private func baueAktionenmenue() -> NSMenuItem {
+        let aktionen = NSMenuItem()
+        let menue = NSMenu(title: "Aktionen")
+
+        for (index, kategorie) in Kategorie.schnellwahl.enumerated() {
+            let eintrag = menue.addItem(
+                withTitle: "Als \(kategorie.anzeigename) schützen",
+                action: Selector(("aktionKategorie:")),
+                keyEquivalent: "\(index + 1)"
+            )
+            eintrag.tag = index
+        }
+        menue.addItem(.separator())
+
+        let mitTaste: [(String, String, NSEvent.ModifierFlags)] = [
+            ("Verwerfen", "aktionVerwerfen:", []),
+            ("Gehört zu …", "aktionZuordnen:", [.command]),
+        ]
+        for (titel, name, zusatz) in mitTaste {
+            let eintrag = menue.addItem(withTitle: titel, action: Selector((name)), keyEquivalent: "")
+            if name == "aktionZuordnen:" {
+                eintrag.keyEquivalent = "d"
+                eintrag.keyEquivalentModifierMask = zusatz
+            }
+        }
+        menue.addItem(.separator())
+
+        let vorige = menue.addItem(
+            withTitle: "Vorige Fundstelle",
+            action: Selector(("aktionVorigeFundstelle:")),
+            keyEquivalent: String(UnicodeScalar(NSUpArrowFunctionKey)!)
+        )
+        vorige.keyEquivalentModifierMask = [.option]
+        let naechste = menue.addItem(
+            withTitle: "Nächste Fundstelle",
+            action: Selector(("aktionNaechsteFundstelle:")),
+            keyEquivalent: String(UnicodeScalar(NSDownArrowFunctionKey)!)
+        )
+        naechste.keyEquivalentModifierMask = [.option]
+
+        menue.addItem(.separator())
+        menue.addItem(withTitle: "Im Text suchen", action: Selector(("aktionSuchen:")), keyEquivalent: "f")
+        menue.addItem(
+            withTitle: "Decknamen im Text ein- und ausblenden",
+            action: Selector(("aktionDecknamenUmschalten:")),
+            keyEquivalent: "e"
+        )
+        menue.addItem(withTitle: "Leeren", action: Selector(("aktionLeeren:")), keyEquivalent: "")
+        menue.addItem(
+            withTitle: "Neuer Text aus der Zwischenablage",
+            action: Selector(("aktionNeuerText:")),
+            keyEquivalent: "n"
+        )
+
+        menue.addItem(.separator())
+        let kopieren = menue.addItem(
+            withTitle: "Ergebnis kopieren",
+            action: Selector(("aktionKopieren:")),
+            keyEquivalent: "\r"
+        )
+        kopieren.keyEquivalentModifierMask = [.command]
+        let kopierenMerken = menue.addItem(
+            withTitle: "Kopieren und alles merken",
+            action: Selector(("aktionKopierenUndMerken:")),
+            keyEquivalent: "\r"
+        )
+        kopierenMerken.keyEquivalentModifierMask = [.command, .shift]
+
+        menue.addItem(.separator())
+        menue.addItem(
+            withTitle: "Platzhalter zuordnen …",
+            action: Selector(("aktionZuordnen:")),
+            keyEquivalent: ""
+        )
+        menue.addItem(
+            withTitle: "Platzhalter als neuen Eintrag …",
+            action: Selector(("aktionNeuerEintrag:")),
+            keyEquivalent: ""
+        )
+
+        aktionen.submenu = menue
+        return aktionen
     }
 
     @objc private func zeigeUeber() {

@@ -8,7 +8,7 @@ import TextschleuseCore
 /// Steht als eigene Ansicht da und nicht im Fenster, weil zwei Fenster sie
 /// zeigen: das Popup, das der Kurzbefehl aufmacht, und das Hauptfenster für
 /// alle, die nicht über die Tastatur arbeiten wollen.
-final class SchutzAnsicht: NSView {
+final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
 
     /// Läuft, wenn übernommen wird. `merken` heißt: die noch offenen
     /// Vermutungen wandern ins Wörterbuch.
@@ -134,6 +134,8 @@ final class SchutzAnsicht: NSView {
 
         merkenHaken.state = .on
         merkenHaken.font = .systemFont(ofSize: 12)
+        merkenHaken.target = self
+        merkenHaken.action = #selector(merkenGeaendert)
         merkenHaken.toolTip = "Aus heißt: der Deckname gilt nur für diesen Text."
 
         meldung.font = .systemFont(ofSize: 11)
@@ -241,7 +243,19 @@ final class SchutzAnsicht: NSView {
         vorschauKnopf.toolTip = "Blendet die Decknamen im Text aus. Bearbeiten geht in beiden Fällen."
         let leeren = NSButton(title: "Leeren", target: self, action: #selector(leeren))
         leeren.toolTip = "Wirft den Text weg. Das Wörterbuch bleibt."
-        for knopf in [verwerfen, gruppe, vorschauKnopf, leeren, neu] {
+        let zurueckKnopf = NSButton(title: "↑", target: self, action: #selector(aktionVorigeFundstelle(_:)))
+        zurueckKnopf.toolTip = "Vorige Fundstelle (⌥↑)"
+        let vorKnopf = NSButton(title: "↓", target: self, action: #selector(aktionNaechsteFundstelle(_:)))
+        vorKnopf.toolTip = "Nächste Fundstelle (⌥↓)"
+        let suchKnopf = NSButton(title: "Suchen", target: self, action: #selector(aktionSuchen(_:)))
+        suchKnopf.toolTip = "Im Text suchen (⌘F)"
+        let widerrufKnopf = NSButton(title: "Widerrufen", target: self, action: #selector(undo(_:)))
+        widerrufKnopf.toolTip = "Letzte Änderung zurücknehmen (⌘Z)"
+
+        for knopf in [
+            verwerfen, gruppe, zurueckKnopf, vorKnopf, suchKnopf,
+            widerrufKnopf, vorschauKnopf, leeren, neu,
+        ] {
             knopf.bezelStyle = .rounded
             knopf.controlSize = .small
             knopfleiste.addArrangedSubview(knopf)
@@ -524,6 +538,18 @@ final class SchutzAnsicht: NSView {
 
     @objc private func kopierenGeklickt() { uebernehmen(merken: false) }
 
+    /// Das Häkchen ändert, was die Kategorietasten tun. Die Kopfzeile sagt
+    /// das bei einer Markierung — also muss sie beim Umschalten nachziehen.
+    @objc private func merkenGeaendert() {
+        if hatFreieMarkierung {
+            kopfzeile.stringValue = merkenHaken.state == .on
+                ? "Markierung: Taste 1–5 legt sie als neuen Eintrag an"
+                : "Markierung: Taste 1–5 schützt sie nur in diesem Text"
+        } else {
+            beschrifteKopf()
+        }
+    }
+
     @objc private func verwerfenGeklickt() { verwerfeAktuellen() }
 
     @objc private func gruppeGeklickt() { gruppeUebernehmen() }
@@ -646,6 +672,57 @@ final class SchutzAnsicht: NSView {
         merkeStand("Verwerfen")
         Schleuse.verwerfe(fundId: fund.id, in: &analyse)
         aktualisiere()
+    }
+
+    // MARK: Tasten und Menü
+
+    /// Ohne das nimmt die Ansicht den Tastaturfokus gar nicht erst an — und
+    /// `makeFirstResponder` scheitert stumm. Genau daran lagen die
+    /// Tastenkürzel, sobald man vorher einen Knopf oder die Liste angeklickt
+    /// hatte.
+    override var acceptsFirstResponder: Bool { true }
+
+    override func keyDown(with ereignis: NSEvent) {
+        if verarbeite(ereignis) { return }
+        super.keyDown(with: ereignis)
+    }
+
+    /// Die Befehle aus dem Menü „Aktionen". Sie laufen über die Antwortkette
+    /// und greifen deshalb auch dann, wenn der Fokus woanders im Fenster
+    /// steht. Jeder Knopf im Fenster ruft dieselbe Methode.
+    @objc func aktionKategorie(_ absender: NSMenuItem) {
+        guard Kategorie.schnellwahl.indices.contains(absender.tag) else { return }
+        setzeKategorie(Kategorie.schnellwahl[absender.tag])
+    }
+
+    @objc func aktionKopieren(_ absender: Any?) { uebernehmen(merken: false) }
+    @objc func aktionKopierenUndMerken(_ absender: Any?) { uebernehmen(merken: true) }
+    @objc func aktionVerwerfen(_ absender: Any?) { verwerfeAktuellen() }
+    @objc func aktionZuordnen(_ absender: Any?) { gruppeUebernehmen() }
+    @objc func aktionLeeren(_ absender: Any?) { leeren() }
+    @objc func aktionNeuerText(_ absender: Any?) { neuEinlesen() }
+    @objc func aktionDecknamenUmschalten(_ absender: Any?) { vorschauUmschalten() }
+    @objc func aktionSuchen(_ absender: Any?) { suche.oeffne() }
+    @objc func aktionNaechsteFundstelle(_ absender: Any?) { waehle(auswahl + 1) }
+    @objc func aktionVorigeFundstelle(_ absender: Any?) { waehle(auswahl - 1) }
+
+    func validateUserInterfaceItem(_ eintrag: NSValidatedUserInterfaceItem) -> Bool {
+        switch eintrag.action {
+        case #selector(aktionKategorie(_:)):
+            return aktuellerFund != nil || hatFreieMarkierung
+        case #selector(aktionVerwerfen(_:)):
+            return aktuellerFund != nil
+        case #selector(aktionZuordnen(_:)):
+            return (aktuellerFund != nil || hatFreieMarkierung) && !analyse.woerterbuch.eintraege.isEmpty
+        case #selector(aktionNaechsteFundstelle(_:)), #selector(aktionVorigeFundstelle(_:)):
+            return !reihenfolge.isEmpty
+        case #selector(undo(_:)):
+            return verlauf.canUndo
+        case #selector(redo(_:)):
+            return verlauf.canRedo
+        default:
+            return true
+        }
     }
 
     // MARK: Widerrufen
