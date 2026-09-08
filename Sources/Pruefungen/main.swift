@@ -562,6 +562,89 @@ Pruefstand.pruefe("Markierung: nur dieser Text") {
                     "steht in der Sitzungszuordnung, damit der Rückweg ihn kennt")
 }
 
+Pruefstand.pruefe("Markierung: der ganze Text wird nachdurchsucht") {
+    let text = """
+        Das Projekt Nordlicht startet im Frühjahr. Die Leitung von Nordlicht \
+        liegt bei der Abteilung Kredit. Nordlichts Budget ist bewilligt.
+        """
+    var analyse = Schleuse.analysiere(text, woerterbuch: Woerterbuch())
+    // Nur das erste Vorkommen markieren.
+    let erstes = (text as NSString).range(of: "Nordlicht")
+
+    Schleuse.markiere(bereich: erstes, als: .begriff, merken: true, in: &analyse)
+    let treffer = analyse.aktiveFunde.filter { $0.eintragId != nil }
+    Pruefstand.gleich(treffer.count, 3, "alle drei Vorkommen, auch die gebeugte Form")
+    Pruefstand.wahr(
+        treffer.allSatisfy { $0.platzhalter == "BEGRIFF_1" },
+        "alle bekommen denselben Platzhalter"
+    )
+
+    let geschuetzt = Schleuse.geschuetzterText(analyse)
+    Pruefstand.enthaeltNicht(geschuetzt, "Nordlicht", "kein Klartext mehr übrig")
+    Pruefstand.gleich(
+        geschuetzt.components(separatedBy: "BEGRIFF_1").count - 1, 3,
+        "dreimal ersetzt"
+    )
+}
+
+Pruefstand.pruefe("Markierung: Nachsuchen ohne Wörterbuch") {
+    let text = "Nordlicht läuft. Nordlicht ist wichtig."
+    var analyse = Schleuse.analysiere(text, woerterbuch: Woerterbuch())
+
+    Schleuse.markiere(
+        bereich: (text as NSString).range(of: "Nordlicht"),
+        als: .begriff,
+        merken: false,
+        in: &analyse
+    )
+    Pruefstand.gleich(analyse.aktiveFunde.count, 2, "beide Vorkommen")
+    Pruefstand.gleich(analyse.woerterbuch.eintraege.count, 0, "trotzdem nichts im Wörterbuch")
+    Pruefstand.enthaeltNicht(Schleuse.geschuetzterText(analyse), "Nordlicht", "beide ersetzt")
+}
+
+Pruefstand.pruefe("Markierung: Nachsuchen achtet Verworfenes") {
+    let text = "Nordlicht läuft. Nordlicht ist wichtig. Nordlicht endet."
+    var analyse = Schleuse.analysiere(text, woerterbuch: Woerterbuch())
+    let nsText = text as NSString
+
+    // Am zweiten Vorkommen ausdrücklich Nein sagen …
+    let zweites = nsText.range(of: "Nordlicht", options: [], range: NSRange(location: 17, length: nsText.length - 17))
+    guard let vorher = Schleuse.markiere(bereich: zweites, als: .begriff, merken: false, in: &analyse) else {
+        Pruefstand.wahr(false, "Markierung angelegt")
+        return
+    }
+    Schleuse.verwerfe(fundId: vorher, in: &analyse)
+
+    // … und dann das erste markieren.
+    Schleuse.markiere(bereich: nsText.range(of: "Nordlicht"), als: .begriff, merken: true, in: &analyse)
+
+    Pruefstand.gleich(analyse.aktiveFunde.count, 2, "erstes und drittes Vorkommen, nicht das verworfene")
+    Pruefstand.enthaelt(
+        Schleuse.geschuetzterText(analyse), "Nordlicht ist wichtig",
+        "die verworfene Stelle bleibt Klartext"
+    )
+}
+
+Pruefstand.pruefe("Bestätigen: der ganze Text wird nachdurchsucht") {
+    let text = """
+        Sehr geehrter Herr Nyström,
+
+        wie mit Ihnen besprochen. Thorben Nyström wird die Unterlagen prüfen.
+        Bitte wenden Sie sich an Nyström.
+        """
+    var analyse = Schleuse.analysiere(text, woerterbuch: Woerterbuch())
+    guard let voll = analyse.ungeprueft.first(where: { $0.text == "Thorben Nyström" }) else {
+        Pruefstand.wahr(false, "„Thorben Nyström" + "\" als Vermutung vorhanden")
+        return
+    }
+
+    Schleuse.bestaetige(fundId: voll.id, als: .person, in: &analyse)
+    Pruefstand.enthaeltNicht(
+        Schleuse.geschuetzterText(analyse), "Nyström",
+        "keine Nennung bleibt im Klartext stehen"
+    )
+}
+
 Pruefstand.pruefe("Markierung: Ränder werden geputzt") {
     let text = "Ansprechpartner ist Nordlicht, bitte melden."
     var analyse = Schleuse.analysiere(text, woerterbuch: Woerterbuch())

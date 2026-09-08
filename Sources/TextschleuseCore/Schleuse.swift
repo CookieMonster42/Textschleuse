@@ -163,6 +163,15 @@ public enum Schleuse {
             analyse.funde[weiterer].bestaetigt = true
         }
 
+        // Auch eine bestätigte Vermutung kann weiter unten im Text noch
+        // einmal stehen, ohne dass die Heuristik sie dort gesehen hat.
+        ergaenzeWeitereVorkommen(
+            eintrag.alleSchreibweisen,
+            kategorie: eintrag.kategorie,
+            eintragId: eintrag.id,
+            quelle: .woerterbuch,
+            in: &analyse
+        )
         ergaenzeNachnamen(von: eintrag, in: &analyse)
     }
 
@@ -225,6 +234,14 @@ public enum Schleuse {
             analyse.funde[weiterer].sicherheit = .sicher
             analyse.funde[weiterer].bestaetigt = true
         }
+
+        ergaenzeWeitereVorkommen(
+            eintrag.alleSchreibweisen,
+            kategorie: eintrag.kategorie,
+            eintragId: eintrag.id,
+            quelle: .woerterbuch,
+            in: &analyse
+        )
     }
 
     // MARK: Freie Markierung
@@ -270,10 +287,20 @@ public enum Schleuse {
         analyse.funde.append(fund)
         analyse.funde.sort { $0.bereich.location < $1.bereich.location }
 
-        // Gleichlautende Stellen im selben Text ziehen mit.
+        // Gleichlautende Stellen, die schon Fundstellen sind, ziehen mit.
         if merken, let eintragId = fund.eintragId {
             uebernimmFuerGleichlautende(text: text, eintragId: eintragId, in: &analyse)
         }
+
+        // Und der ganze Text wird nach weiteren Vorkommen durchsucht, die
+        // vorher niemandem aufgefallen sind.
+        ergaenzeWeitereVorkommen(
+            schreibweisen(fuer: fund, in: analyse),
+            kategorie: kategorie,
+            eintragId: fund.eintragId,
+            quelle: .markierung,
+            in: &analyse
+        )
         return fund.id
     }
 
@@ -328,6 +355,75 @@ public enum Schleuse {
             analyse.funde[index].sicherheit = .sicher
             analyse.funde[index].bestaetigt = true
         }
+    }
+
+    // MARK: Nachsuchen
+
+    /// Sucht einen gerade festgelegten Begriff im ganzen Text und legt für
+    /// jedes weitere Vorkommen eine Fundstelle an.
+    ///
+    /// Ohne das schützt du „Nordlicht" an der einen Stelle, an der du es
+    /// markiert hast, und drei Absätze weiter steht es im Klartext. Gesucht
+    /// wird mit denselben Schreibvarianten wie beim Wörterbuch, gebeugte
+    /// Formen also eingeschlossen.
+    ///
+    /// Stellen, an denen schon eine Fundstelle liegt, bleiben unangetastet —
+    /// auch verworfene. Wer dort ausdrücklich Nein gesagt hat, soll es nicht
+    /// durch die Hintertür zurückbekommen.
+    @discardableResult
+    static func ergaenzeWeitereVorkommen(
+        _ schreibweisen: [(text: String, platzhalter: String)],
+        kategorie: Kategorie,
+        eintragId: UUID?,
+        quelle: Quelle,
+        in analyse: inout Analyse
+    ) -> Int {
+        let nsText = analyse.original as NSString
+        let ganzerText = NSRange(location: 0, length: nsText.length)
+        var neue: [Fund] = []
+
+        // Längere Schreibweisen zuerst, damit „Thorben Nyström" gewinnt und
+        // nicht in zwei Funde zerfällt.
+        for (begriff, platzhalter) in schreibweisen.sorted(by: { $0.text.count > $1.text.count }) {
+            // Bei ein oder zwei Zeichen trifft die Suche zu viel. Die
+            // markierte Stelle selbst steht schon, nur das Nachsuchen entfällt.
+            guard begriff.count >= 3, let regex = Varianten.regex(fuer: begriff) else { continue }
+
+            for treffer in regex.matches(in: analyse.original, range: ganzerText) {
+                let belegt = analyse.funde.contains {
+                    NSIntersectionRange($0.bereich, treffer.range).length > 0
+                } || neue.contains {
+                    NSIntersectionRange($0.bereich, treffer.range).length > 0
+                }
+                guard !belegt else { continue }
+
+                var fund = Fund(
+                    bereich: treffer.range,
+                    text: nsText.substring(with: treffer.range),
+                    kategorie: kategorie,
+                    sicherheit: .sicher,
+                    quelle: quelle,
+                    eintragId: eintragId,
+                    platzhalter: platzhalter
+                )
+                fund.bestaetigt = true
+                neue.append(fund)
+            }
+        }
+
+        guard !neue.isEmpty else { return 0 }
+        analyse.funde.append(contentsOf: neue)
+        analyse.funde.sort { $0.bereich.location < $1.bereich.location }
+        return neue.count
+    }
+
+    /// Die Schreibweisen, unter denen ein Fund im Text noch stecken kann.
+    private static func schreibweisen(fuer fund: Fund, in analyse: Analyse) -> [(text: String, platzhalter: String)] {
+        if let eintragId = fund.eintragId,
+           let eintrag = analyse.woerterbuch.eintrag(mitId: eintragId) {
+            return eintrag.alleSchreibweisen
+        }
+        return [(text: fund.text, platzhalter: fund.platzhalter)]
     }
 
     // MARK: Deckname

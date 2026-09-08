@@ -294,7 +294,9 @@ final class SchutzPopup: TastaturPanel {
 
     private var hatFreieMarkierung: Bool { freieMarkierung != nil }
 
+    /// Rote Meldung für Fehler. Erfolgsmeldungen setzt `meldeNachtrag`.
     private func zeigeMeldung(_ text: String?) {
+        meldung.textColor = .systemRed
         meldung.stringValue = text ?? ""
         meldung.isHidden = text == nil
     }
@@ -391,6 +393,8 @@ final class SchutzPopup: TastaturPanel {
     private func setzeKategorie(_ kategorie: Kategorie) {
         zeigeMeldung(nil)
 
+        let vorher = analyse.aktiveFunde.count
+
         if let bereich = freieMarkierung {
             let merken = merkenHaken.state == .on
             guard let neue = Schleuse.markiere(
@@ -405,17 +409,33 @@ final class SchutzPopup: TastaturPanel {
             textAnsicht.setSelectedRange(NSRange(location: 0, length: 0))
             aktualisiere()
             waehleFund(neue)
+            meldeNachtrag(vorher: vorher, merken: merken)
             return
         }
 
         guard let fund = aktuellerFund else { return }
-        Schleuse.bestaetige(
-            fundId: fund.id,
-            als: kategorie,
-            in: &analyse,
-            merken: merkenHaken.state == .on
-        )
+        let merken = merkenHaken.state == .on
+        Schleuse.bestaetige(fundId: fund.id, als: kategorie, in: &analyse, merken: merken)
         weiterZurNaechstenLuecke()
+        meldeNachtrag(vorher: vorher, merken: merken)
+    }
+
+    /// Sagt, was gerade passiert ist. Ohne diese Zeile merkst du nicht, dass
+    /// derselbe Begriff noch dreimal weiter unten im Text stand.
+    private func meldeNachtrag(vorher: Int, merken: Bool) {
+        let dazu = analyse.aktiveFunde.count - vorher - 1
+        var teile: [String] = []
+        if dazu > 0 {
+            teile.append(dazu == 1
+                ? "eine weitere Stelle im Text mitgeschützt"
+                : "\(dazu) weitere Stellen im Text mitgeschützt")
+        }
+        teile.append(merken ? "ins Wörterbuch übernommen" : "gilt nur für diesen Text")
+
+        meldung.textColor = .secondaryLabelColor
+        meldung.stringValue = teile.joined(separator: ", ").prefix(1).uppercased()
+            + teile.joined(separator: ", ").dropFirst() + "."
+        meldung.isHidden = false
     }
 
     private func gruppeUebernehmen() {
