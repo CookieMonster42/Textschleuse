@@ -28,6 +28,7 @@ final class SchutzPopup: TastaturPanel {
     private var textAnsicht: ChiptextAnsicht { flaeche.text }
     private var rollflaeche: NSScrollView { flaeche.rolle }
     private let liste = Fundstellenliste()
+    private lazy var suche = Textsuche(ziel: textAnsicht)
 
     private let knopfleiste = NSStackView()
     private let decknameFeld = NSTextField()
@@ -66,6 +67,12 @@ final class SchutzPopup: TastaturPanel {
             self?.waehleFund(kennung)
         }
 
+        suche.translatesAutoresizingMaskIntoConstraints = false
+        suche.beimSchliessen = { [weak self] in
+            guard let self else { return }
+            self.makeFirstResponder(self.textAnsicht)
+        }
+
         knopfleiste.orientation = .horizontal
         knopfleiste.spacing = 6
         baueKnoepfe()
@@ -92,7 +99,7 @@ final class SchutzPopup: TastaturPanel {
         fusszeile.textColor = .secondaryLabelColor
         fusszeile.stringValue = "1–5 Kategorie, dann Deckname tippen und ⏎ · ⏎ im Text Kopieren · "
             + "⌘⏎ Kopieren und alles merken · ↑ ↓ Fundstelle · ⌫ Verwerfen · G Zur Gruppe · "
-            + "⌘N Neuer Text · ⎋ Abbrechen"
+            + "⌘F Suchen · ⌘N Neuer Text · ⎋ Abbrechen"
 
         // Text und Liste nebeneinander.
         let mitte = NSStackView(views: [rollflaeche, liste])
@@ -107,7 +114,7 @@ final class SchutzPopup: TastaturPanel {
         decknameZeile.translatesAutoresizingMaskIntoConstraints = false
 
         let stapel = NSStackView(views: [
-            kopfzeile, regelzeile, mitte, knopfleiste, decknameZeile, fusszeile,
+            kopfzeile, regelzeile, suche, mitte, knopfleiste, decknameZeile, fusszeile,
         ])
         stapel.orientation = .vertical
         stapel.spacing = 10
@@ -123,7 +130,7 @@ final class SchutzPopup: TastaturPanel {
         for zeile in [kopfzeile, regelzeile, fusszeile] {
             zeile.setContentHuggingPriority(.required, for: .vertical)
         }
-        for teil in [knopfleiste, decknameZeile] {
+        for teil in [knopfleiste, decknameZeile, suche] {
             teil.setContentHuggingPriority(.required, for: .vertical)
         }
         mitte.setContentHuggingPriority(.defaultLow, for: .vertical)
@@ -135,6 +142,7 @@ final class SchutzPopup: TastaturPanel {
             mitte.heightAnchor.constraint(greaterThanOrEqualToConstant: 260),
             liste.widthAnchor.constraint(equalToConstant: 260),
             decknameZeile.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
+            suche.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
             decknameFeld.widthAnchor.constraint(greaterThanOrEqualToConstant: 180),
         ])
     }
@@ -194,6 +202,8 @@ final class SchutzPopup: TastaturPanel {
         if let gewaehlt, let bereich = bereiche[gewaehlt] {
             textAnsicht.scrollRangeToVisible(bereich)
         }
+        // Der Text ist neu aufgebaut, die alten Trefferbereiche zeigen ins Leere.
+        suche.aktualisiere()
         aktualisiereWerkzeuge()
     }
 
@@ -319,6 +329,12 @@ final class SchutzPopup: TastaturPanel {
             switch ereignis.charactersIgnoringModifiers?.lowercased() {
             case "n":
                 neuEinlesen()
+                return true
+            case "f":
+                suche.oeffne()
+                return true
+            case "g":
+                if zusatz.contains(.shift) { suche.vorheriger() } else { suche.naechster() }
                 return true
             default:
                 break

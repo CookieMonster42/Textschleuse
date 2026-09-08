@@ -25,6 +25,7 @@ final class RueckwegPopup: TastaturPanel {
     private var textAnsicht: ChiptextAnsicht { flaeche.text }
     private var rollflaeche: NSScrollView { flaeche.rolle }
     private let liste = Fundstellenliste()
+    private lazy var suche = Textsuche(ziel: textAnsicht)
     private let knopfleiste = NSStackView()
     private let fusszeile = NSTextField(labelWithString: "")
     private let meldung = NSTextField(labelWithString: "")
@@ -65,6 +66,12 @@ final class RueckwegPopup: TastaturPanel {
             self?.waehleFund(kennung)
         }
 
+        suche.translatesAutoresizingMaskIntoConstraints = false
+        suche.beimSchliessen = { [weak self] in
+            guard let self else { return }
+            self.makeFirstResponder(self.textAnsicht)
+        }
+
         knopfleiste.orientation = .horizontal
         knopfleiste.spacing = 6
         let neu = NSButton(title: "Neuer Text (⌘N)", target: self, action: #selector(neuEinlesen))
@@ -80,7 +87,7 @@ final class RueckwegPopup: TastaturPanel {
 
         fusszeile.font = .systemFont(ofSize: 11)
         fusszeile.textColor = .secondaryLabelColor
-        fusszeile.stringValue = "⏎ Kopieren · ⎋ Abbrechen · ↑ ↓ Platzhalter · ⌘N Neuer Text"
+        fusszeile.stringValue = "⏎ Kopieren · ↑ ↓ Platzhalter · ⌘F Suchen · ⌘N Neuer Text · ⎋ Abbrechen"
 
         let mitte = NSStackView(views: [rollflaeche, liste])
         mitte.orientation = .horizontal
@@ -88,7 +95,7 @@ final class RueckwegPopup: TastaturPanel {
         mitte.distribution = .fill
         mitte.translatesAutoresizingMaskIntoConstraints = false
 
-        let stapel = NSStackView(views: [kopfzeile, warnzeile, mitte, knopfleiste, fusszeile])
+        let stapel = NSStackView(views: [kopfzeile, warnzeile, suche, mitte, knopfleiste, fusszeile])
         stapel.orientation = .vertical
         stapel.spacing = 10
         stapel.alignment = .leading
@@ -99,6 +106,7 @@ final class RueckwegPopup: TastaturPanel {
             zeile.setContentHuggingPriority(.required, for: .vertical)
         }
         knopfleiste.setContentHuggingPriority(.required, for: .vertical)
+        suche.setContentHuggingPriority(.required, for: .vertical)
         mitte.setContentHuggingPriority(.defaultLow, for: .vertical)
         mitte.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
 
@@ -106,6 +114,7 @@ final class RueckwegPopup: TastaturPanel {
             mitte.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
             mitte.heightAnchor.constraint(greaterThanOrEqualToConstant: 260),
             liste.widthAnchor.constraint(equalToConstant: 260),
+            suche.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
         ])
     }
 
@@ -132,6 +141,7 @@ final class RueckwegPopup: TastaturPanel {
         if let gewaehlt, let bereich = bereiche[gewaehlt] {
             textAnsicht.scrollRangeToVisible(bereich)
         }
+        suche.aktualisiere()
     }
 
     private func beschrifteKopf() {
@@ -213,11 +223,19 @@ final class RueckwegPopup: TastaturPanel {
     private func verarbeite(_ ereignis: NSEvent) -> Bool {
         let zusatz = ereignis.modifierFlags.intersection(.deviceIndependentFlagsMask)
         if zusatz.contains(.command) {
-            if ereignis.charactersIgnoringModifiers?.lowercased() == "n" {
+            switch ereignis.charactersIgnoringModifiers?.lowercased() {
+            case "n":
                 neuEinlesen()
                 return true
+            case "f":
+                suche.oeffne()
+                return true
+            case "g":
+                if zusatz.contains(.shift) { suche.vorheriger() } else { suche.naechster() }
+                return true
+            default:
+                return false
             }
-            return false
         }
 
         switch ereignis.keyCode {

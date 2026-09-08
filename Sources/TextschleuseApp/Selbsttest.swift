@@ -25,6 +25,7 @@ enum Selbsttest {
         fehler += pruefeKurzbefehl()
         fehler += pruefeDarstellung()
         fehler += pruefeRueckrechnung()
+        fehler += pruefeSuche()
         fehler += pruefeMarkierenImPopup()
 
         print("")
@@ -302,6 +303,79 @@ enum Selbsttest {
             fehler += 1
         }
         return fehler
+    }
+
+    /// ⌘F: findet die Suche, was dasteht, und springt sie an?
+    private static func pruefeSuche() -> Int {
+        let text = """
+            Sehr geehrter Herr Nyström, das Projekt Nordlicht läuft.             Zu Nordlicht gehört auch die Abteilung Kredit. Nordlicht endet im Mai.
+            """
+        let analyse = Schleuse.analysiere(text, woerterbuch: Woerterbuch())
+        let popup = SchutzPopup(analyse: analyse) { _ in }
+        popup.layoutIfNeeded()
+        defer { popup.orderOut(nil) }
+
+        guard let inhalt = popup.contentView,
+              let suche = suchzeileSuchen(in: inhalt),
+              let textAnsicht = rollflaecheSuchen(in: inhalt)?.documentView as? NSTextView
+        else {
+            print("✗ Suche: Suchzeile oder Textfläche nicht gefunden")
+            return 1
+        }
+
+        var fehler = 0
+        suche.oeffne()
+
+        let treffer = suche.suche(nach: "nordlicht")
+        if treffer == 3 {
+            print("✓ Suche: 3 Treffer, Groß- und Kleinschreibung egal")
+        } else {
+            print("✗ Suche: \(treffer) Treffer statt 3")
+            fehler += 1
+        }
+
+        // Der erste Treffer muss angesprungen und markiert sein.
+        let markiert = (textAnsicht.string as NSString).substring(with: textAnsicht.selectedRange())
+        if markiert.lowercased() == "nordlicht" {
+            print("✓ Suche: der erste Treffer ist markiert")
+        } else {
+            print("✗ Suche: markiert ist „\(markiert)\" statt „Nordlicht\"")
+            fehler += 1
+        }
+
+        // Weiterspringen muss eine andere Stelle treffen.
+        let ersteStelle = textAnsicht.selectedRange().location
+        suche.naechster()
+        if textAnsicht.selectedRange().location != ersteStelle {
+            print("✓ Suche: ⌘G springt zum nächsten Treffer")
+        } else {
+            print("✗ Suche: ⌘G bleibt stehen")
+            fehler += 1
+        }
+
+        if suche.suche(nach: "gibtesnicht") == 0 {
+            print("✓ Suche: was nicht dasteht, wird nicht gefunden")
+        } else {
+            print("✗ Suche: Treffer für einen Begriff, der nicht im Text steht")
+            fehler += 1
+        }
+
+        suche.schliesse()
+        if !suche.istOffen {
+            print("✓ Suche: ⎋ klappt die Zeile wieder zu")
+        } else {
+            print("✗ Suche: die Zeile bleibt offen")
+            fehler += 1
+        }
+        return fehler
+    }
+
+    private static func suchzeileSuchen(in ansicht: NSView) -> Textsuche? {
+        if let treffer = ansicht as? Textsuche { return treffer }
+        for unter in ansicht.subviews {
+            if let treffer = suchzeileSuchen(in: unter) { return treffer }
+        }
+        return nil
     }
 
     private static func rollflaecheSuchen(in ansicht: NSView) -> NSScrollView? {
