@@ -76,7 +76,8 @@ final class SchutzPopup: TastaturPanel {
         decknameFeld.placeholderString = "PERSON_1"
         decknameFeld.target = self
         decknameFeld.action = #selector(decknameUebernehmen)
-        decknameFeld.toolTip = "Großbuchstaben, Ziffern, Unterstrich. ⏎ übernimmt."
+        decknameFeld.delegate = self
+        decknameFeld.toolTip = "Großbuchstaben, Ziffern, Unterstrich. ⏎ übernimmt, ⎋ verwirft."
 
         merkenHaken.state = .on
         merkenHaken.font = .systemFont(ofSize: 12)
@@ -89,8 +90,9 @@ final class SchutzPopup: TastaturPanel {
 
         fusszeile.font = .systemFont(ofSize: 11)
         fusszeile.textColor = .secondaryLabelColor
-        fusszeile.stringValue = "⏎ Kopieren · ⌘⏎ Kopieren und alles merken · ⎋ Abbrechen · "
-            + "↑ ↓ Fundstelle · 1–5 Kategorie · ⌫ Verwerfen · G Zur Gruppe · ⌘N Neuer Text"
+        fusszeile.stringValue = "1–5 Kategorie, dann Deckname tippen und ⏎ · ⏎ im Text Kopieren · "
+            + "⌘⏎ Kopieren und alles merken · ↑ ↓ Fundstelle · ⌫ Verwerfen · G Zur Gruppe · "
+            + "⌘N Neuer Text · ⎋ Abbrechen"
 
         // Text und Liste nebeneinander.
         let mitte = NSStackView(views: [rollflaeche, liste])
@@ -410,14 +412,28 @@ final class SchutzPopup: TastaturPanel {
             aktualisiere()
             waehleFund(neue)
             meldeNachtrag(vorher: vorher, merken: merken)
+            uebernimmDecknamen()
             return
         }
 
         guard let fund = aktuellerFund else { return }
         let merken = merkenHaken.state == .on
         Schleuse.bestaetige(fundId: fund.id, als: kategorie, in: &analyse, merken: merken)
-        weiterZurNaechstenLuecke()
+        aktualisiere()
         meldeNachtrag(vorher: vorher, merken: merken)
+        uebernimmDecknamen()
+    }
+
+    /// Setzt den Schreibcursor ins Deckname-Feld und markiert den
+    /// vorgeschlagenen Namen.
+    ///
+    /// Direkt nach der Zuweisung ist der Moment, in dem man weiß, wie das Ding
+    /// heißen soll. Der markierte Vorschlag heißt: tippen überschreibt ihn,
+    /// ⏎ übernimmt, und wem `PERSON_3` reicht, der drückt einfach ⏎.
+    private func uebernimmDecknamen() {
+        guard aktuellerFund != nil else { return }
+        makeFirstResponder(decknameFeld)
+        decknameFeld.currentEditor()?.selectAll(nil)
     }
 
     /// Sagt, was gerade passiert ist. Ohne diese Zeile merkst du nicht, dass
@@ -470,23 +486,35 @@ final class SchutzPopup: TastaturPanel {
         textAnsicht.scroll(NSPoint(x: 0, y: 0))
     }
 
+    /// ⏎ im Deckname-Feld: übernehmen und weiter zur nächsten offenen Stelle.
     @objc private func decknameUebernehmen() {
         guard let fund = aktuellerFund else { return }
         let eingabe = decknameFeld.stringValue
-        guard eingabe.uppercased() != fund.platzhalter.uppercased() else {
-            makeFirstResponder(textAnsicht)
-            return
+
+        if eingabe.uppercased() != fund.platzhalter.uppercased() {
+            do {
+                try Schleuse.benenneUm(fundId: fund.id, auf: eingabe, in: &analyse)
+                zeigeMeldung(nil)
+                aktualisiere()
+            } catch {
+                // Im Feld bleiben: der Name ist noch nicht gültig, und wer
+                // jetzt rausspringt, verliert das Getippte aus den Augen.
+                zeigeMeldung(error.localizedDescription)
+                decknameFeld.currentEditor()?.selectAll(nil)
+                return
+            }
         }
 
-        do {
-            try Schleuse.benenneUm(fundId: fund.id, auf: eingabe, in: &analyse)
-            zeigeMeldung(nil)
-            aktualisiere()
-            makeFirstResponder(textAnsicht)
-        } catch {
-            zeigeMeldung(error.localizedDescription)
-            decknameFeld.stringValue = fund.platzhalter
-        }
+        makeFirstResponder(textAnsicht)
+        weiterZurNaechstenLuecke()
+    }
+
+    /// ⎋ im Deckname-Feld verwirft nur das Getippte. Das Popup bleibt offen —
+    /// sonst wäre ein Vertipper die teuerste Taste im Fenster.
+    private func decknameAbbrechen() {
+        decknameFeld.stringValue = aktuellerFund?.platzhalter ?? ""
+        zeigeMeldung(nil)
+        makeFirstResponder(textAnsicht)
     }
 
     /// Nach einer Entscheidung zur nächsten offenen Vermutung springen. Wenn
@@ -513,6 +541,23 @@ final class SchutzPopup: TastaturPanel {
     }
 }
 
+extension SchutzPopup: NSTextFieldDelegate {
+
+    /// Fängt ⎋ im Deckname-Feld ab, bevor es beim Fenster landet und das
+    /// ganze Popup schließt.
+    func control(
+        _ steuerelement: NSControl,
+        textView: NSTextView,
+        doCommandBy befehl: Selector
+    ) -> Bool {
+        guard steuerelement === decknameFeld, befehl == #selector(NSResponder.cancelOperation(_:)) else {
+            return false
+        }
+        decknameAbbrechen()
+        return true
+    }
+}
+
 extension SchutzPopup: NSTextViewDelegate {
 
     /// Klick auf einen Chip wählt ihn aus. Die Chips tragen dafür eine
@@ -535,6 +580,8 @@ extension SchutzPopup: NSTextViewDelegate {
 
     /// Sobald du im Text markierst, ändert sich, was die Kategorieknöpfe tun.
     func textViewDidChangeSelection(_ meldung: Notification) {
+        // Das Feldeditor-Textview des Deckname-Felds meldet sich hier auch.
+        guard meldung.object as AnyObject? === textAnsicht else { return }
         aktualisiereWerkzeuge()
         if hatFreieMarkierung {
             zeigeMeldung(nil)
