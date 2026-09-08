@@ -24,6 +24,8 @@ enum Selbsttest {
         fehler += pruefeZwischenablage()
         fehler += pruefeKurzbefehl()
         fehler += pruefeDarstellung()
+        fehler += pruefeRueckrechnung()
+        fehler += pruefeMarkierenImPopup()
 
         print("")
         print(fehler == 0 ? "Alles in Ordnung." : "\(fehler) Punkt(e) fehlgeschlagen.")
@@ -117,6 +119,16 @@ enum Selbsttest {
             }
         }
 
+        // Zeigt die Liste rechts die Fundstellen?
+        let tabelle = tabelleSuchen(in: inhalt)
+        if let tabelle, tabelle.numberOfRows == analyse.funde.count {
+            print("✓ Darstellung: \(tabelle.numberOfRows) Zeilen in der Fundstellenliste")
+        } else {
+            print("✗ Darstellung: die Fundstellenliste zeigt "
+                + "\(tabelle?.numberOfRows ?? -1) statt \(analyse.funde.count) Zeilen")
+            fehler += 1
+        }
+
         // Sitzt der Inhalt tatsächlich im Fenster oder ist er in eine Ecke
         // zusammengefallen?
         let fensterflaeche = popup.frame.width * popup.frame.height
@@ -134,10 +146,116 @@ enum Selbsttest {
         return fehler
     }
 
+    /// Die Darstellung ist nicht der Originaltext: Chips schieben Platzhalter
+    /// dazwischen, lange Passagen sind eingeklappt. Eine Markierung mit der
+    /// Maus muss trotzdem auf der richtigen Stelle im Original landen.
+    private static func pruefeRueckrechnung() -> Int {
+        // Lang genug, dass Chiptext einklappt.
+        let fuellung = String(repeating: "Sonst nichts Auffälliges in diesem Absatz. ", count: 12)
+        let text = "Herr Nyström schrieb an almut@example.org. \(fuellung)Projekt Nordlicht läuft."
+        let analyse = Schleuse.analysiere(text, woerterbuch: Woerterbuch())
+        let aufbau = Chiptext.aufbauen(analyse: analyse, ausgewaehlt: nil)
+
+        var fehler = 0
+        let original = text as NSString
+
+        for gesucht in ["Nordlicht", "Sonst"] {
+            let imOriginal = original.range(of: gesucht)
+            // Die Stelle in der Darstellung suchen und zurückrechnen.
+            let inAnzeige = (aufbau.text.string as NSString).range(of: gesucht)
+            guard inAnzeige.location != NSNotFound else {
+                print("✗ Rückrechnung: „\(gesucht)\" steht nicht in der Darstellung")
+                fehler += 1
+                continue
+            }
+            let zurueck = Chiptext.originalBereich(fuer: inAnzeige, in: aufbau.text)
+            if zurueck == imOriginal {
+                print("✓ Rückrechnung: „\(gesucht)\" landet auf der richtigen Stelle")
+            } else {
+                print("✗ Rückrechnung: „\(gesucht)\" → \(zurueck.map(NSStringFromRange) ?? "nichts"), "
+                    + "erwartet \(NSStringFromRange(imOriginal))")
+                fehler += 1
+            }
+        }
+
+        // Eine Markierung über einem Chip muss auf den Fund zeigen.
+        if let fund = analyse.aktiveFunde.first(where: { $0.kategorie == .email }),
+           let chipBereich = aufbau.bereiche[fund.id] {
+            let zurueck = Chiptext.originalBereich(fuer: chipBereich, in: aufbau.text)
+            if zurueck == fund.bereich {
+                print("✓ Rückrechnung: Markierung über einem Chip trifft den Fund")
+            } else {
+                print("✗ Rückrechnung: Markierung über einem Chip zeigt auf \(zurueck.map(NSStringFromRange) ?? "nichts")")
+                fehler += 1
+            }
+        }
+        return fehler
+    }
+
+    /// Der Weg, den du im Popup gehst: markieren, Kategorie drücken, Deckname
+    /// ändern. Ohne Bildschirm nachgestellt.
+    private static func pruefeMarkierenImPopup() -> Int {
+        let text = "Das Projekt Nordlicht startet im Frühjahr."
+        var analyse = Schleuse.analysiere(text, woerterbuch: Woerterbuch())
+        var fehler = 0
+
+        guard let kennung = Schleuse.markiere(
+            bereich: (text as NSString).range(of: "Nordlicht"),
+            als: .begriff,
+            merken: true,
+            in: &analyse
+        ) else {
+            print("✗ Markieren: die Markierung wurde nicht angenommen")
+            return 1
+        }
+
+        if analyse.woerterbuch.eintrag(fuerText: "Nordlicht") != nil {
+            print("✓ Markieren: der Begriff liegt im Wörterbuch")
+        } else {
+            print("✗ Markieren: der Begriff fehlt im Wörterbuch")
+            fehler += 1
+        }
+
+        do {
+            try Schleuse.benenneUm(fundId: kennung, auf: "projekt_n", in: &analyse)
+            let geschuetzt = Schleuse.geschuetzterText(analyse)
+            if geschuetzt.contains("PROJEKT_N") {
+                print("✓ Markieren: eigener Deckname steht im Ergebnis")
+            } else {
+                print("✗ Markieren: eigener Deckname fehlt im Ergebnis")
+                fehler += 1
+            }
+
+            let zurueck = Rueckweg.analysiere(
+                geschuetzt,
+                woerterbuch: analyse.woerterbuch,
+                unbekannte: analyse.unbekannte
+            )
+            if zurueck.ergebnis == text {
+                print("✓ Markieren: der Rückweg stellt den Text wieder her")
+            } else {
+                print("✗ Markieren: der Rückweg liefert etwas anderes")
+                fehler += 1
+            }
+        } catch {
+            print("✗ Markieren: Umbenennen fehlgeschlagen (\(error.localizedDescription))")
+            fehler += 1
+        }
+        return fehler
+    }
+
     private static func rollflaecheSuchen(in ansicht: NSView) -> NSScrollView? {
         if let rolle = ansicht as? NSScrollView, rolle.documentView is NSTextView { return rolle }
         for unter in ansicht.subviews {
             if let treffer = rollflaecheSuchen(in: unter) { return treffer }
+        }
+        return nil
+    }
+
+    private static func tabelleSuchen(in ansicht: NSView) -> NSTableView? {
+        if let tabelle = ansicht as? NSTableView { return tabelle }
+        for unter in ansicht.subviews {
+            if let treffer = tabelleSuchen(in: unter) { return treffer }
         }
         return nil
     }

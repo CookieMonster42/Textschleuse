@@ -3,8 +3,9 @@ import TextschleuseCore
 
 /// Das Fenster, das nach dem Schutz-Kurzbefehl aufgeht.
 ///
-/// Es zeigt den Text mit den Fundstellen als Chips. Grün heißt geregelt, rot
-/// heißt geraten. Enter legt das Ergebnis in die Zwischenablage.
+/// Links der Text mit den Fundstellen als Chips, rechts die Liste aller
+/// Fundstellen mit ihrem Stand, unten die Werkzeuge für die ausgewählte
+/// Fundstelle. Enter legt das Ergebnis in die Zwischenablage.
 final class SchutzPopup: TastaturPanel {
 
     enum Ausgang {
@@ -24,9 +25,15 @@ final class SchutzPopup: TastaturPanel {
     private let kopfzeile = NSTextField(labelWithString: "")
     private let regelzeile = NSTextField(labelWithString: "")
     private let flaeche = Textflaeche.bauen()
-    private var textAnsicht: NSTextView { flaeche.text }
+    private var textAnsicht: ChiptextAnsicht { flaeche.text }
     private var rollflaeche: NSScrollView { flaeche.rolle }
+    private let liste = Fundstellenliste()
+
     private let knopfleiste = NSStackView()
+    private let decknameFeld = NSTextField()
+    private let decknameEtikett = NSTextField(labelWithString: "Deckname")
+    private let merkenHaken = NSButton(checkboxWithTitle: "dauerhaft merken", target: nil, action: nil)
+    private let meldung = NSTextField(labelWithString: "")
     private let fusszeile = NSTextField(labelWithString: "")
 
     init(analyse: Analyse, abschluss: @escaping (Ausgang) -> Void) {
@@ -35,7 +42,7 @@ final class SchutzPopup: TastaturPanel {
 
         let bildschirm = TastaturPanel.bildschirmUnterMaus
         let maximal = TastaturPanel.maximaleGroesse(auf: bildschirm)
-        super.init(groesse: NSSize(width: min(860, maximal.width), height: min(600, maximal.height)))
+        super.init(groesse: NSSize(width: min(1000, maximal.width), height: min(640, maximal.height)))
 
         baueOberflaeche()
         aktualisiere()
@@ -50,17 +57,56 @@ final class SchutzPopup: TastaturPanel {
         regelzeile.lineBreakMode = .byTruncatingTail
 
         textAnsicht.delegate = self
+        textAnsicht.tastenweiche = { [weak self] ereignis in
+            self?.verarbeite(ereignis) ?? false
+        }
+
+        liste.translatesAutoresizingMaskIntoConstraints = false
+        liste.beiAuswahl = { [weak self] kennung in
+            self?.waehleFund(kennung)
+        }
 
         knopfleiste.orientation = .horizontal
         knopfleiste.spacing = 6
         baueKnoepfe()
 
+        decknameEtikett.font = .systemFont(ofSize: 11)
+        decknameEtikett.textColor = .secondaryLabelColor
+        decknameFeld.font = .monospacedSystemFont(ofSize: 12, weight: .medium)
+        decknameFeld.placeholderString = "PERSON_1"
+        decknameFeld.target = self
+        decknameFeld.action = #selector(decknameUebernehmen)
+        decknameFeld.toolTip = "Großbuchstaben, Ziffern, Unterstrich. ⏎ übernimmt."
+
+        merkenHaken.state = .on
+        merkenHaken.font = .systemFont(ofSize: 12)
+        merkenHaken.toolTip = "Aus heißt: der Deckname gilt nur für diesen Text."
+
+        meldung.font = .systemFont(ofSize: 11)
+        meldung.textColor = .systemRed
+        meldung.lineBreakMode = .byTruncatingTail
+        meldung.isHidden = true
+
         fusszeile.font = .systemFont(ofSize: 11)
         fusszeile.textColor = .secondaryLabelColor
-        fusszeile.stringValue =
-            "⏎ Kopieren · ⌘⏎ Kopieren und merken · ⎋ Abbrechen · ↑ ↓ Fundstelle · ⌫ Verwerfen"
+        fusszeile.stringValue = "⏎ Kopieren · ⌘⏎ Kopieren und alles merken · ⎋ Abbrechen · "
+            + "↑ ↓ Fundstelle · 1–5 Kategorie · ⌫ Verwerfen · G Zur Gruppe · ⌘N Neuer Text"
 
-        let stapel = NSStackView(views: [kopfzeile, regelzeile, rollflaeche, knopfleiste, fusszeile])
+        // Text und Liste nebeneinander.
+        let mitte = NSStackView(views: [rollflaeche, liste])
+        mitte.orientation = .horizontal
+        mitte.spacing = 12
+        mitte.distribution = .fill
+        mitte.translatesAutoresizingMaskIntoConstraints = false
+
+        let decknameZeile = NSStackView(views: [decknameEtikett, decknameFeld, merkenHaken, meldung])
+        decknameZeile.orientation = .horizontal
+        decknameZeile.spacing = 8
+        decknameZeile.translatesAutoresizingMaskIntoConstraints = false
+
+        let stapel = NSStackView(views: [
+            kopfzeile, regelzeile, mitte, knopfleiste, decknameZeile, fusszeile,
+        ])
         stapel.orientation = .vertical
         stapel.spacing = 10
         stapel.alignment = .leading
@@ -72,19 +118,22 @@ final class SchutzPopup: TastaturPanel {
         // untere Ecke.
         contentView = stapel
 
-        // Von allen Zeilen soll nur die Textfläche wachsen.
         for zeile in [kopfzeile, regelzeile, fusszeile] {
             zeile.setContentHuggingPriority(.required, for: .vertical)
         }
-        knopfleiste.setContentHuggingPriority(.required, for: .vertical)
-        rollflaeche.setContentHuggingPriority(.defaultLow, for: .vertical)
-        rollflaeche.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        for teil in [knopfleiste, decknameZeile] {
+            teil.setContentHuggingPriority(.required, for: .vertical)
+        }
+        mitte.setContentHuggingPriority(.defaultLow, for: .vertical)
+        mitte.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        decknameFeld.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
         NSLayoutConstraint.activate([
-            // Über die Breite zieht sich die Textfläche selbst auf; die
-            // Randabstände stecken schon in den edgeInsets.
-            rollflaeche.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
-            rollflaeche.heightAnchor.constraint(greaterThanOrEqualToConstant: 180),
+            mitte.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
+            mitte.heightAnchor.constraint(greaterThanOrEqualToConstant: 260),
+            liste.widthAnchor.constraint(equalToConstant: 260),
+            decknameZeile.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
+            decknameFeld.widthAnchor.constraint(greaterThanOrEqualToConstant: 180),
         ])
     }
 
@@ -104,16 +153,16 @@ final class SchutzPopup: TastaturPanel {
         }
 
         let verwerfen = NSButton(title: "Verwerfen (⌫)", target: self, action: #selector(verwerfenGeklickt))
-        verwerfen.bezelStyle = .rounded
-        verwerfen.controlSize = .small
         verwerfen.toolTip = "Rücktaste macht dasselbe"
-        knopfleiste.addArrangedSubview(verwerfen)
-
         let gruppe = NSButton(title: "Zur Gruppe (G)", target: self, action: #selector(gruppeGeklickt))
-        gruppe.bezelStyle = .rounded
-        gruppe.controlSize = .small
         gruppe.toolTip = "Taste G macht dasselbe"
-        knopfleiste.addArrangedSubview(gruppe)
+        let neu = NSButton(title: "Neuer Text (⌘N)", target: self, action: #selector(neuEinlesen))
+        neu.toolTip = "Liest, was jetzt in der Zwischenablage liegt. Der bisherige Text wird verworfen."
+        for knopf in [verwerfen, gruppe, neu] {
+            knopf.bezelStyle = .rounded
+            knopf.controlSize = .small
+            knopfleiste.addArrangedSubview(knopf)
+        }
     }
 
     // MARK: Darstellung
@@ -123,11 +172,7 @@ final class SchutzPopup: TastaturPanel {
             .filter { !$0.verworfen }
             .sorted { $0.bereich.location < $1.bereich.location }
             .map(\.id)
-        if reihenfolge.isEmpty {
-            auswahl = 0
-        } else {
-            auswahl = min(auswahl, reihenfolge.count - 1)
-        }
+        auswahl = reihenfolge.isEmpty ? 0 : min(auswahl, reihenfolge.count - 1)
 
         let gewaehlt = reihenfolge.indices.contains(auswahl) ? reihenfolge[auswahl] : nil
         let aufbau = Chiptext.aufbauen(analyse: analyse, ausgewaehlt: gewaehlt)
@@ -143,17 +188,47 @@ final class SchutzPopup: TastaturPanel {
         let zusammenfassung = analyse.regelZusammenfassung
             .map { "\($0.anzahl) \($0.kategorie.anzeigename)" }
             .joined(separator: ", ")
-        regelzeile.stringValue = zusammenfassung.isEmpty
-            ? "Keine Regeltreffer."
-            : "Ohne Nachfrage ersetzt: \(zusammenfassung)."
+        let gemerkt = analyse.aktiveFunde.filter { $0.eintragId != nil }.count
+        var teile: [String] = []
+        if !zusammenfassung.isEmpty { teile.append("Ohne Nachfrage ersetzt: \(zusammenfassung)") }
+        teile.append(gemerkt == 1 ? "1 Eintrag im Wörterbuch" : "\(gemerkt) Einträge im Wörterbuch")
+        regelzeile.stringValue = teile.joined(separator: " · ") + "."
+
+        liste.zeige(analyse.funde.sorted { $0.bereich.location < $1.bereich.location }.map(listenzeile),
+                    ausgewaehlt: gewaehlt)
 
         if let gewaehlt, let bereich = bereiche[gewaehlt] {
             textAnsicht.scrollRangeToVisible(bereich)
         }
-        aktualisiereKnoepfe()
+        aktualisiereWerkzeuge()
     }
 
-    private func aktualisiereKnoepfe() {
+    private func listenzeile(_ fund: Fund) -> Fundstellenliste.Zeile {
+        Fundstellenliste.Zeile(
+            id: fund.id,
+            begriff: fund.text,
+            deckname: fund.verworfen ? "—" : fund.platzhalter,
+            status: status(fuer: fund),
+            farbe: fund.verworfen ? .tertiaryLabelColor : Chiptext.farbe(fuer: fund),
+            abgeschwaecht: fund.verworfen
+        )
+    }
+
+    /// Der Satz, der in der Liste unter dem Begriff steht. Er beantwortet:
+    /// Bleibt das über diesen Text hinaus bestehen?
+    private func status(fuer fund: Fund) -> String {
+        if fund.verworfen { return "bleibt im Klartext" }
+        if fund.eintragId != nil {
+            return fund.quelle == .regel || analyse.woerterbuch
+                .eintrag(mitId: fund.eintragId!)?.automatischErkannt == true
+                ? "gemerkt, automatisch erkannt"
+                : "gemerkt"
+        }
+        if fund.brauchtPruefung { return "offen, bitte prüfen" }
+        return "nur dieser Text"
+    }
+
+    private func aktualisiereWerkzeuge() {
         let fund = aktuellerFund
         for ansicht in knopfleiste.arrangedSubviews {
             guard let knopf = ansicht as? NSButton else { continue }
@@ -164,9 +239,12 @@ final class SchutzPopup: TastaturPanel {
                     knopf.toolTip = "Als weitere Schreibweise zu \(eintrag.text) (\(eintrag.platzhalter))"
                 }
             } else {
-                knopf.isEnabled = fund != nil
+                knopf.isEnabled = fund != nil || hatFreieMarkierung
             }
         }
+
+        decknameFeld.isEnabled = fund != nil && !(fund?.verworfen ?? true)
+        decknameFeld.stringValue = fund?.verworfen == false ? (fund?.platzhalter ?? "") : ""
     }
 
     private var aktuellerFund: Fund? {
@@ -175,50 +253,100 @@ final class SchutzPopup: TastaturPanel {
         return analyse.funde.first { $0.id == kennung }
     }
 
+    /// Eine Markierung im Text, die über die ausgewählte Fundstelle
+    /// hinausgeht. Nur dann heißt „Person (1)" auch: mach daraus eine Person.
+    private var freieMarkierung: NSRange? {
+        let anzeige = textAnsicht.selectedRange()
+        guard anzeige.length > 0,
+              let original = Chiptext.originalBereich(
+                fuer: anzeige,
+                in: textAnsicht.attributedString()
+              )
+        else { return nil }
+        if let fund = aktuellerFund, fund.bereich == original { return nil }
+        return original
+    }
+
+    private var hatFreieMarkierung: Bool { freieMarkierung != nil }
+
+    private func zeigeMeldung(_ text: String?) {
+        meldung.stringValue = text ?? ""
+        meldung.isHidden = text == nil
+    }
+
     // MARK: Tastatur
 
-    override func keyDown(with ereignis: NSEvent) {
+    /// Wird sowohl vom Fenster als auch von der Textansicht aufgerufen.
+    /// Liefert `true`, wenn der Tastendruck erledigt ist.
+    @discardableResult
+    private func verarbeite(_ ereignis: NSEvent) -> Bool {
+        // Im Deckname-Feld gehören die Tasten dem Feld.
+        if decknameFeld.currentEditor() != nil {
+            return false
+        }
+
         let zusatz = ereignis.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if zusatz.contains(.command) {
+            switch ereignis.charactersIgnoringModifiers?.lowercased() {
+            case "n":
+                neuEinlesen()
+                return true
+            default:
+                break
+            }
+            // ⌘C und Konsorten gehören der Textansicht, nur ⌘⏎ nicht.
+            if ereignis.keyCode != 36, ereignis.keyCode != 76 { return false }
+        }
 
         switch ereignis.keyCode {
         case 36, 76:  // Return, Enter
             uebernehmen(merken: zusatz.contains(.command))
-            return
+            return true
         case 53:  // Escape
             abbrechen()
-            return
+            return true
         case 126:  // Pfeil hoch
             waehle(auswahl - 1)
-            return
+            return true
         case 125:  // Pfeil runter
             waehle(auswahl + 1)
-            return
+            return true
         case 51, 117:  // Rücktaste, Entfernen
             verwerfeAktuellen()
-            return
+            return true
         default:
             break
         }
 
-        guard let zeichen = ereignis.charactersIgnoringModifiers?.lowercased() else {
-            super.keyDown(with: ereignis)
-            return
-        }
-
+        guard let zeichen = ereignis.charactersIgnoringModifiers?.lowercased() else { return false }
         if let ziffer = Int(zeichen), (1...Kategorie.schnellwahl.count).contains(ziffer) {
             setzeKategorie(Kategorie.schnellwahl[ziffer - 1])
-            return
+            return true
         }
         if zeichen == "g" {
             gruppeUebernehmen()
-            return
+            return true
         }
+        return false
+    }
+
+    override func keyDown(with ereignis: NSEvent) {
+        if verarbeite(ereignis) { return }
         super.keyDown(with: ereignis)
     }
 
     private func waehle(_ index: Int) {
         guard !reihenfolge.isEmpty else { return }
         auswahl = (index + reihenfolge.count) % reihenfolge.count
+        textAnsicht.setSelectedRange(NSRange(location: 0, length: 0))
+        zeigeMeldung(nil)
+        aktualisiere()
+    }
+
+    private func waehleFund(_ kennung: UUID) {
+        guard let index = reihenfolge.firstIndex(of: kennung) else { return }
+        auswahl = index
+        zeigeMeldung(nil)
         aktualisiere()
     }
 
@@ -233,9 +361,35 @@ final class SchutzPopup: TastaturPanel {
 
     @objc private func gruppeGeklickt() { gruppeUebernehmen() }
 
+    /// Eine Kategorie zuweisen. Liegt eine eigene Markierung im Text, gilt sie;
+    /// sonst die ausgewählte Fundstelle.
     private func setzeKategorie(_ kategorie: Kategorie) {
+        zeigeMeldung(nil)
+
+        if let bereich = freieMarkierung {
+            let merken = merkenHaken.state == .on
+            guard let neue = Schleuse.markiere(
+                bereich: bereich,
+                als: kategorie,
+                merken: merken,
+                in: &analyse
+            ) else {
+                zeigeMeldung("Da ist nichts, was sich schützen ließe.")
+                return
+            }
+            textAnsicht.setSelectedRange(NSRange(location: 0, length: 0))
+            aktualisiere()
+            waehleFund(neue)
+            return
+        }
+
         guard let fund = aktuellerFund else { return }
-        Schleuse.bestaetige(fundId: fund.id, als: kategorie, in: &analyse)
+        Schleuse.bestaetige(
+            fundId: fund.id,
+            als: kategorie,
+            in: &analyse,
+            merken: merkenHaken.state == .on
+        )
         weiterZurNaechstenLuecke()
     }
 
@@ -249,6 +403,45 @@ final class SchutzPopup: TastaturPanel {
         guard let fund = aktuellerFund else { return }
         Schleuse.verwerfe(fundId: fund.id, in: &analyse)
         aktualisiere()
+    }
+
+    /// Holt sich, was jetzt in der Zwischenablage liegt, und fängt damit von
+    /// vorn an. Das Wörterbuch bleibt, alles andere am alten Text ist weg.
+    @objc private func neuEinlesen() {
+        guard let text = Zwischenablage.lies() else {
+            zeigeMeldung("In der Zwischenablage steht kein Text.")
+            return
+        }
+        guard text != analyse.original else {
+            zeigeMeldung("In der Zwischenablage liegt derselbe Text wie hier.")
+            return
+        }
+
+        analyse = Schleuse.analysiere(text, woerterbuch: analyse.woerterbuch)
+        auswahl = 0
+        textAnsicht.setSelectedRange(NSRange(location: 0, length: 0))
+        zeigeMeldung(nil)
+        aktualisiere()
+        textAnsicht.scroll(NSPoint(x: 0, y: 0))
+    }
+
+    @objc private func decknameUebernehmen() {
+        guard let fund = aktuellerFund else { return }
+        let eingabe = decknameFeld.stringValue
+        guard eingabe.uppercased() != fund.platzhalter.uppercased() else {
+            makeFirstResponder(textAnsicht)
+            return
+        }
+
+        do {
+            try Schleuse.benenneUm(fundId: fund.id, auf: eingabe, in: &analyse)
+            zeigeMeldung(nil)
+            aktualisiere()
+            makeFirstResponder(textAnsicht)
+        } catch {
+            zeigeMeldung(error.localizedDescription)
+            decknameFeld.stringValue = fund.platzhalter
+        }
     }
 
     /// Nach einer Entscheidung zur nächsten offenen Vermutung springen. Wenn
@@ -288,12 +481,21 @@ extension SchutzPopup: NSTextViewDelegate {
         } else {
             return false
         }
-        let kennung = text.replacingOccurrences(of: "fund://", with: "")
-        guard let uuid = UUID(uuidString: kennung),
-              let index = reihenfolge.firstIndex(of: uuid)
+        guard let uuid = UUID(uuidString: text.replacingOccurrences(of: "fund://", with: "")),
+              reihenfolge.contains(uuid)
         else { return false }
-        auswahl = index
-        aktualisiere()
+        waehleFund(uuid)
         return true
+    }
+
+    /// Sobald du im Text markierst, ändert sich, was die Kategorieknöpfe tun.
+    func textViewDidChangeSelection(_ meldung: Notification) {
+        aktualisiereWerkzeuge()
+        if hatFreieMarkierung {
+            zeigeMeldung(nil)
+            kopfzeile.stringValue = merkenHaken.state == .on
+                ? "Markierung: Taste 1–5 legt sie als neuen Eintrag an"
+                : "Markierung: Taste 1–5 schützt sie nur in diesem Text"
+        }
     }
 }

@@ -9,6 +9,8 @@ public enum Quelle: String, Sendable {
     case regel
     /// Vermutung aus Namensliste, Rechtsform oder Schreibmuster.
     case heuristik
+    /// Von Hand im Popup markiert.
+    case markierung
 }
 
 /// Eine Stelle im Text, die ersetzt werden soll.
@@ -91,9 +93,11 @@ extension Fund {
     /// Wörterbuch schlägt Regel schlägt Vermutung.
     fileprivate var rang: Int {
         switch quelle {
-        case .woerterbuch: return 0
-        case .regel: return 1
-        case .heuristik: return 2
+        // Von Hand markiert schlägt alles: du hast es ausdrücklich gesagt.
+        case .markierung: return 0
+        case .woerterbuch: return 1
+        case .regel: return 2
+        case .heuristik: return 3
         }
     }
 }

@@ -1,5 +1,15 @@
 import Foundation
 
+extension JSONDecoder {
+    /// Wie der Decoder im Speicher. Für die Prüfung, ob eine alte Datei noch
+    /// lädt — der echte ist im Kern nicht öffentlich.
+    static var textschleusePruefung: JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }
+}
+
 /// Testkorpus. Alle Namen, Nummern und Adressen sind erfunden. Echte
 /// Kundendaten gehören nicht in dieses Verzeichnis, auch nicht ausgedachte
 /// Varianten echter Vorgänge.
