@@ -17,6 +17,12 @@ final class SchutzPopup: TastaturPanel {
     private let ansicht: SchutzAnsicht
     private let abschluss: (Ausgang) -> Void
 
+    /// Reicht jede Änderung an die Sitzung weiter.
+    var beiAenderung: ((Analyse) -> Void)? {
+        get { ansicht.beiAenderung }
+        set { ansicht.beiAenderung = newValue }
+    }
+
     init(analyse: Analyse, abschluss: @escaping (Ausgang) -> Void) {
         self.ansicht = SchutzAnsicht(analyse: analyse)
         self.abschluss = abschluss

@@ -17,6 +17,11 @@ final class SchutzAnsicht: NSView {
     /// wird der Text nur verworfen.
     var beiAbbruch: (() -> Void)?
 
+    /// Läuft nach jeder Änderung. Die Sitzung schreibt damit mit, ohne dass
+    /// man erst kopieren müsste — so sieht das Hauptfenster, was im Popup
+    /// gerade passiert ist.
+    var beiAenderung: ((Analyse) -> Void)?
+
     private(set) var analyse: Analyse
 
     private var auswahl: Int = 0
@@ -279,6 +284,7 @@ final class SchutzAnsicht: NSView {
         // Der Text ist neu aufgebaut, die alten Trefferbereiche zeigen ins Leere.
         suche.aktualisiere()
         aktualisiereWerkzeuge()
+        beiAenderung?(analyse)
     }
 
     /// Die beiden Zeilen über dem Text. Sie müssen auch dann etwas sagen, wenn
