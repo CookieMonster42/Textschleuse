@@ -36,6 +36,7 @@ enum Selbsttest {
         fehler += pruefeWiderruf()
         fehler += pruefeSitzung()
         fehler += pruefeZuordnenImRueckweg()
+        fehler += pruefeKnoepfeUndMenue()
 
         print("")
         print(fehler == 0 ? "Alles in Ordnung." : "\(fehler) Punkt(e) fehlgeschlagen.")
@@ -1045,6 +1046,92 @@ enum Selbsttest {
             }
         }
         return fehler
+    }
+
+    /// Jeder Knopf muss jemanden erreichen, und jeder Menüpunkt auch. Ein
+    /// Knopf, dessen Ziel den Befehl nicht kennt, tut beim Klicken nichts —
+    /// das sieht man erst, wenn man ihn drückt.
+    private static func pruefeKnoepfeUndMenue() -> Int {
+        var fehler = 0
+        let text = "Herr Nyström rief an, Tel. 0621 1234567."
+
+        let schutz = SchutzAnsicht(analyse: Schleuse.analysiere(text, woerterbuch: Woerterbuch()))
+        let rueckweg = RueckwegAnsicht(
+            ergebnis: Rueckweg.analysiere("Frage an PERSON_1.", woerterbuch: Woerterbuch())
+        )
+        for ansicht in [schutz as NSView, rueckweg as NSView] {
+            let fenster = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 1000, height: 640),
+                styleMask: [.titled],
+                backing: .buffered,
+                defer: false
+            )
+            fenster.contentView = ansicht
+            fenster.layoutIfNeeded()
+            defer { fenster.orderOut(nil) }
+
+            let name = ansicht is SchutzAnsicht ? "Schützen" : "Zurückdrehen"
+            if ansicht.acceptsFirstResponder {
+                print("✓ Bedienung (\(name)): die Ansicht nimmt den Tastaturfokus an")
+            } else {
+                print("✗ Bedienung (\(name)): die Ansicht nimmt keinen Fokus — Tastenkürzel wären tot")
+                fehler += 1
+            }
+
+            let knoepfe = knoepfeSammeln(in: ansicht)
+            var lose: [String] = []
+            for knopf in knoepfe {
+                guard let aktion = knopf.action else {
+                    lose.append(knopf.title)
+                    continue
+                }
+                let ziel = knopf.target ?? ansicht
+                if !(ziel as AnyObject).responds(to: aktion) { lose.append(knopf.title) }
+            }
+            if lose.isEmpty {
+                print("✓ Bedienung (\(name)): alle \(knoepfe.count) Knöpfe sind verdrahtet")
+            } else {
+                print("✗ Bedienung (\(name)): ins Leere zeigen \(lose.joined(separator: ", "))")
+                fehler += 1
+            }
+        }
+
+        // Der Rückweg braucht einen Kopier-Knopf: ⏎ allein reicht nicht für
+        // alle, die nicht über die Tastatur arbeiten.
+        let rueckwegKnoepfe = knoepfeSammeln(in: rueckweg).map(\.title)
+        if rueckwegKnoepfe.contains(where: { $0.contains("kopieren") }) {
+            print("✓ Bedienung: der Rückweg hat einen Knopf zum Kopieren")
+        } else {
+            print("✗ Bedienung: im Rückweg fehlt der Kopier-Knopf")
+            fehler += 1
+        }
+
+        // Und jeder Menüpunkt aus „Aktionen" muss von mindestens einer der
+        // beiden Ansichten verstanden werden.
+        let menuebefehle = [
+            "aktionKategorie:", "aktionVerwerfen:", "aktionZuordnen:",
+            "aktionVorigeFundstelle:", "aktionNaechsteFundstelle:", "aktionSuchen:",
+            "aktionDecknamenUmschalten:", "aktionLeeren:", "aktionNeuerText:",
+            "aktionKopieren:", "aktionKopierenUndMerken:", "aktionNeuerEintrag:",
+        ]
+        let unverstanden = menuebefehle.filter { name in
+            let auswahl = Selector((name))
+            return !schutz.responds(to: auswahl) && !rueckweg.responds(to: auswahl)
+        }
+        if unverstanden.isEmpty {
+            print("✓ Bedienung: alle \(menuebefehle.count) Menübefehle kommen an")
+        } else {
+            print("✗ Bedienung: niemand versteht \(unverstanden.joined(separator: ", "))")
+            fehler += 1
+        }
+        return fehler
+    }
+
+    private static func knoepfeSammeln(in ansicht: NSView) -> [NSButton] {
+        var gefunden: [NSButton] = []
+        if let knopf = ansicht as? NSButton { gefunden.append(knopf) }
+        for unter in ansicht.subviews { gefunden += knoepfeSammeln(in: unter) }
+        return gefunden
     }
 
     private static func reiterSuchen(in ansicht: NSView) -> NSTabView? {
