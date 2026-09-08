@@ -180,6 +180,96 @@ public struct Woerterbuch: Codable, Sendable {
         return alias
     }
 
+    // MARK: Bearbeiten
+
+    public enum EintragFehler: LocalizedError, Equatable {
+        case leer
+        case schonVorhanden(String)
+
+        public var errorDescription: String? {
+            switch self {
+            case .leer:
+                return "Der Begriff darf nicht leer sein."
+            case .schonVorhanden(let text):
+                return "„\(text)\" steht schon in einem anderen Eintrag."
+            }
+        }
+    }
+
+    /// Ändert die Hauptnennung. Der Deckname bleibt, wie er ist — sonst
+    /// stimmten die schon verschickten Texte nicht mehr.
+    public mutating func aendereText(_ eintragId: UUID, auf eingabe: String) throws {
+        let text = eingabe.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { throw EintragFehler.leer }
+        guard let index = eintraege.firstIndex(where: { $0.id == eintragId }) else { return }
+        try pruefeFreienBegriff(text, ausser: eintragId)
+        eintraege[index].text = text
+    }
+
+    /// Ändert die Kategorie. Hängt der Deckname an ihr — `PERSON_3` —, dann
+    /// ändert er sich mit; der alte bleibt auflösbar. Ein selbst vergebener
+    /// Deckname bleibt unangetastet.
+    public mutating func aendereKategorie(_ eintragId: UUID, auf kategorie: Kategorie) {
+        guard let index = eintraege.firstIndex(where: { $0.id == eintragId }),
+              eintraege[index].kategorie != kategorie
+        else { return }
+
+        let bisher = eintraege[index].platzhalter
+        // Eine frische Nummer aus der neuen Kategorie, sonst kollidiert sie
+        // mit einem Eintrag, der dieselbe Nummer dort schon hat.
+        let nummer = naechsteNummern[kategorie.rawValue] ?? 1
+        naechsteNummern[kategorie.rawValue] = nummer + 1
+
+        eintraege[index].kategorie = kategorie
+        eintraege[index].nummer = nummer
+
+        if eintraege[index].platzhalter != bisher,
+           !eintraege[index].fruehereDecknamen.contains(bisher) {
+            eintraege[index].fruehereDecknamen.append(bisher)
+        }
+    }
+
+    /// Ändert die Schreibweise eines Alias. Sein Buchstabe bleibt, damit
+    /// `PERSON_3B` weiter dasselbe meint.
+    public mutating func aendereAlias(_ aliasId: UUID, in eintragId: UUID, auf eingabe: String) throws {
+        let text = eingabe.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { throw EintragFehler.leer }
+        guard let index = eintraege.firstIndex(where: { $0.id == eintragId }),
+              let aliasIndex = eintraege[index].aliase.firstIndex(where: { $0.id == aliasId })
+        else { return }
+        try pruefeFreienBegriff(text, ausser: eintragId)
+        eintraege[index].aliase[aliasIndex].text = text
+    }
+
+    /// Entfernt eine Schreibweise. Ihr Buchstabe wird nicht neu vergeben.
+    public mutating func loescheAlias(_ aliasId: UUID, in eintragId: UUID) {
+        guard let index = eintraege.firstIndex(where: { $0.id == eintragId }) else { return }
+        eintraege[index].aliase.removeAll { $0.id == aliasId }
+    }
+
+    /// Macht aus einer Schreibweise die Hauptnennung und umgekehrt. Für den
+    /// Fall, dass zuerst „Nyström" gemerkt wurde und später der volle Name
+    /// auftaucht.
+    public mutating func machtZurHauptnennung(_ aliasId: UUID, in eintragId: UUID) {
+        guard let index = eintraege.firstIndex(where: { $0.id == eintragId }),
+              let aliasIndex = eintraege[index].aliase.firstIndex(where: { $0.id == aliasId })
+        else { return }
+        let bisherigeHauptnennung = eintraege[index].text
+        eintraege[index].text = eintraege[index].aliase[aliasIndex].text
+        eintraege[index].aliase[aliasIndex].text = bisherigeHauptnennung
+    }
+
+    private func pruefeFreienBegriff(_ text: String, ausser eintragId: UUID) throws {
+        let gesucht = text.lowercased()
+        let belegt = eintraege
+            .filter { $0.id != eintragId }
+            .contains { eintrag in
+                eintrag.text.lowercased() == gesucht
+                    || eintrag.aliase.contains { $0.text.lowercased() == gesucht }
+            }
+        if belegt { throw EintragFehler.schonVorhanden(text) }
+    }
+
     /// Entfernt einen Eintrag samt Aliasen. Die Nummer bleibt verbrannt, damit
     /// bereits verschickte Texte eindeutig bleiben.
     public mutating func loeschen(_ eintragId: UUID) {

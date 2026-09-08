@@ -1,11 +1,8 @@
 import AppKit
 import TextschleuseCore
 
-/// Liste aller gemerkten Begriffe. Aliase stehen eingerückt unter ihrer
-/// Hauptnennung.
-///
-/// Was hier fehlt und in der nächsten Ausbaustufe dazukommt: Suchfeld,
-/// Zusammenlegen per Ziehen und das Bearbeiten der Schreibweise.
+/// Das Wörterbuch: links die Liste, rechts der Editor für den ausgewählten
+/// Eintrag. Aliase stehen eingerückt unter ihrer Hauptnennung.
 final class WoerterbuchFenster: NSWindowController {
 
     private static var offen: WoerterbuchFenster?
@@ -15,7 +12,9 @@ final class WoerterbuchFenster: NSWindowController {
     private let beimExportieren: (URL, Woerterbuch) throws -> Void
 
     private let tabelle = NSTableView()
+    fileprivate let editor = EintragEditor()
     private let zaehler = NSTextField(labelWithString: "")
+    private let suchfeld = NSSearchField()
 
     /// Flachgeklopfte Darstellung: Hauptnennung, danach ihre Aliase.
     private struct Zeile {
@@ -28,6 +27,9 @@ final class WoerterbuchFenster: NSWindowController {
     }
 
     private var zeilen: [Zeile] = []
+    /// Bleibt über einen Neuaufbau der Liste hinweg erhalten, damit der Editor
+    /// nach jeder Änderung denselben Eintrag zeigt.
+    fileprivate var ausgewaehlt: UUID?
 
     static func zeige(
         woerterbuch: Woerterbuch,
@@ -55,7 +57,7 @@ final class WoerterbuchFenster: NSWindowController {
         self.beimExportieren = beimExportieren
 
         let fenster = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 720, height: 480),
+            contentRect: NSRect(x: 0, y: 0, width: 980, height: 560),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
@@ -73,10 +75,10 @@ final class WoerterbuchFenster: NSWindowController {
 
     private func baueOberflaeche() {
         for (kennung, titel, breite) in [
-            ("text", "Begriff", 260.0),
-            ("platzhalter", "Platzhalter", 130.0),
-            ("kategorie", "Typ", 120.0),
-            ("herkunft", "Herkunft", 150.0),
+            ("text", "Begriff", 220.0),
+            ("platzhalter", "Deckname", 130.0),
+            ("kategorie", "Typ", 100.0),
+            ("herkunft", "Herkunft", 120.0),
         ] {
             let spalte = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(kennung))
             spalte.title = titel
@@ -92,6 +94,17 @@ final class WoerterbuchFenster: NSWindowController {
         rollflaeche.documentView = tabelle
         rollflaeche.hasVerticalScroller = true
         rollflaeche.borderType = .bezelBorder
+        rollflaeche.translatesAutoresizingMaskIntoConstraints = false
+
+        editor.translatesAutoresizingMaskIntoConstraints = false
+        editor.beiBefehl = { [weak self] befehl in self?.fuehreAus(befehl) }
+
+        suchfeld.placeholderString = "Filtern"
+        suchfeld.target = self
+        suchfeld.action = #selector(gefiltert)
+        suchfeld.sendsWholeSearchString = false
+        suchfeld.sendsSearchStringImmediately = true
+        suchfeld.translatesAutoresizingMaskIntoConstraints = false
 
         zaehler.font = .systemFont(ofSize: 11)
         zaehler.textColor = .secondaryLabelColor
@@ -105,40 +118,62 @@ final class WoerterbuchFenster: NSWindowController {
         let exportieren = NSButton(title: "Klartext-Export …", target: self, action: #selector(exportiere))
         for knopf in [loeschen, autoLeeren, exportieren] {
             knopf.bezelStyle = .rounded
-            knopf.controlSize = .regular
         }
 
         let knopfleiste = NSStackView(views: [loeschen, autoLeeren, exportieren, NSView(), zaehler])
         knopfleiste.orientation = .horizontal
         knopfleiste.spacing = 8
+        knopfleiste.translatesAutoresizingMaskIntoConstraints = false
 
         let hinweis = NSTextField(labelWithString:
             "Gelöschte Nummern werden nicht neu vergeben. Der Klartext-Export ist unverschlüsselt.")
         hinweis.font = .systemFont(ofSize: 11)
         hinweis.textColor = .secondaryLabelColor
 
-        let stapel = NSStackView(views: [rollflaeche, knopfleiste, hinweis])
+        let links = NSStackView(views: [suchfeld, rollflaeche])
+        links.orientation = .vertical
+        links.spacing = 8
+        links.translatesAutoresizingMaskIntoConstraints = false
+
+        let mitte = NSStackView(views: [links, editor])
+        mitte.orientation = .horizontal
+        mitte.spacing = 16
+        mitte.distribution = .fill
+        mitte.translatesAutoresizingMaskIntoConstraints = false
+
+        let stapel = NSStackView(views: [mitte, knopfleiste, hinweis])
         stapel.orientation = .vertical
         stapel.spacing = 10
         stapel.alignment = .leading
         stapel.edgeInsets = NSEdgeInsets(top: 14, left: 16, bottom: 14, right: 16)
         window?.contentView = stapel
 
-        rollflaeche.translatesAutoresizingMaskIntoConstraints = false
         knopfleiste.setContentHuggingPriority(.required, for: .vertical)
         hinweis.setContentHuggingPriority(.required, for: .vertical)
-        rollflaeche.setContentHuggingPriority(.defaultLow, for: .vertical)
-        rollflaeche.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        mitte.setContentHuggingPriority(.defaultLow, for: .vertical)
+        mitte.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
 
         NSLayoutConstraint.activate([
-            rollflaeche.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -32),
+            mitte.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -32),
+            mitte.heightAnchor.constraint(greaterThanOrEqualToConstant: 380),
             knopfleiste.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -32),
-            rollflaeche.heightAnchor.constraint(greaterThanOrEqualToConstant: 240),
+            suchfeld.widthAnchor.constraint(equalTo: links.widthAnchor),
+            editor.widthAnchor.constraint(equalToConstant: 340),
         ])
     }
 
+    // MARK: Darstellung
+
     private func aktualisiere() {
+        let filter = suchfeld.stringValue.trimmingCharacters(in: .whitespaces).lowercased()
+
         zeilen = woerterbuch.eintraege
+            .filter { eintrag in
+                guard !filter.isEmpty else { return true }
+                return eintrag.text.lowercased().contains(filter)
+                    || eintrag.platzhalter.lowercased().contains(filter)
+                    || eintrag.aliase.contains { $0.text.lowercased().contains(filter) }
+            }
             .sorted { ($0.kategorie.praefix, $0.nummer) < ($1.kategorie.praefix, $1.nummer) }
             .flatMap { eintrag -> [Zeile] in
                 let haupt = Zeile(
@@ -164,8 +199,20 @@ final class WoerterbuchFenster: NSWindowController {
 
         let anzahl = woerterbuch.eintraege.count
         let automatisch = woerterbuch.eintraege.filter(\.automatischErkannt).count
-        zaehler.stringValue = "\(anzahl) Einträge, davon \(automatisch) automatisch erkannt"
+        zaehler.stringValue = filter.isEmpty
+            ? "\(anzahl) Einträge, davon \(automatisch) automatisch erkannt"
+            : "\(Set(zeilen.map(\.eintragId)).count) von \(anzahl) Einträgen"
+
         tabelle.reloadData()
+        stelleAuswahlWiederHer()
+        editor.zeige(ausgewaehlt.flatMap { woerterbuch.eintrag(mitId: $0) })
+    }
+
+    private func stelleAuswahlWiederHer() {
+        guard let ausgewaehlt,
+              let index = zeilen.firstIndex(where: { $0.eintragId == ausgewaehlt && !$0.istAlias })
+        else { return }
+        tabelle.selectRowIndexes([index], byExtendingSelection: false)
     }
 
     private func sichere() {
@@ -173,7 +220,44 @@ final class WoerterbuchFenster: NSWindowController {
         aktualisiere()
     }
 
+    // MARK: Befehle aus dem Editor
+
+    /// Führt aus, was der Editor meldet. Rückgabe `nil` heißt: hat geklappt.
+    private func fuehreAus(_ befehl: EintragEditor.Befehl) -> String? {
+        guard let kennung = ausgewaehlt else { return nil }
+        do {
+            switch befehl {
+            case .begriff(let text):
+                try woerterbuch.aendereText(kennung, auf: text)
+            case .kategorie(let kategorie):
+                woerterbuch.aendereKategorie(kennung, auf: kategorie)
+            case .deckname(let name):
+                _ = try woerterbuch.umbenennen(kennung, auf: name)
+            case .decknameZuruecksetzen:
+                woerterbuch.decknameZuruecksetzen(kennung)
+            case .aliasNeu(let text):
+                guard woerterbuch.aliasHinzufuegen(text, zu: kennung) != nil else {
+                    return "Diese Schreibweise gibt es schon."
+                }
+            case .aliasText(let aliasId, let text):
+                try woerterbuch.aendereAlias(aliasId, in: kennung, auf: text)
+            case .aliasLoeschen(let aliasId):
+                woerterbuch.loescheAlias(aliasId, in: kennung)
+            case .aliasHauptnennung(let aliasId):
+                woerterbuch.machtZurHauptnennung(aliasId, in: kennung)
+            }
+        } catch {
+            // Nichts wurde geändert; die Meldung geht zurück in den Editor.
+            aktualisiere()
+            return error.localizedDescription
+        }
+        sichere()
+        return nil
+    }
+
     // MARK: Aktionen
+
+    @objc private func gefiltert() { aktualisiere() }
 
     @objc private func loescheAuswahl() {
         let betroffen = Set(tabelle.selectedRowIndexes.compactMap { zeilen[$0].eintragId })
@@ -190,6 +274,7 @@ final class WoerterbuchFenster: NSWindowController {
         guard meldung.runModal() == .alertFirstButtonReturn else { return }
 
         for kennung in betroffen { woerterbuch.loeschen(kennung) }
+        if let ausgewaehlt, betroffen.contains(ausgewaehlt) { self.ausgewaehlt = nil }
         sichere()
     }
 
@@ -203,6 +288,7 @@ final class WoerterbuchFenster: NSWindowController {
         guard meldung.runModal() == .alertFirstButtonReturn else { return }
 
         woerterbuch.automatischErkannteLoeschen()
+        ausgewaehlt = nil
         sichere()
     }
 
@@ -259,5 +345,26 @@ extension WoerterbuchFenster: NSTableViewDataSource, NSTableViewDelegate {
         feld.textColor = zeile.istAlias ? .secondaryLabelColor : .labelColor
         feld.lineBreakMode = .byTruncatingTail
         return feld
+    }
+
+    func tableViewSelectionDidChange(_ meldung: Notification) {
+        guard zeilen.indices.contains(tabelle.selectedRow) else {
+            waehle(nil)
+            return
+        }
+        waehle(zeilen[tabelle.selectedRow].eintragId)
+    }
+}
+
+extension WoerterbuchFenster {
+
+    /// Wählt einen Eintrag aus und zeigt ihn im Editor.
+    ///
+    /// Steht hier und nicht nur im Delegaten, weil `selectRowIndexes` die
+    /// Benachrichtigung nicht in jedem Fall auslöst. Wer die Auswahl
+    /// programmgesteuert setzt — der Selbsttest etwa —, ruft das hier.
+    func waehle(_ kennung: UUID?) {
+        ausgewaehlt = kennung
+        editor.zeige(kennung.flatMap { woerterbuch.eintrag(mitId: $0) })
     }
 }

@@ -27,6 +27,7 @@ enum Selbsttest {
         fehler += pruefeRueckrechnung()
         fehler += pruefeSuche()
         fehler += pruefeMarkierenImPopup()
+        fehler += pruefeWoerterbuchfenster()
 
         print("")
         print(fehler == 0 ? "Alles in Ordnung." : "\(fehler) Punkt(e) fehlgeschlagen.")
@@ -368,6 +369,127 @@ enum Selbsttest {
             fehler += 1
         }
         return fehler
+    }
+
+    /// Baut das Wörterbuchfenster auf und bedient den Editor über dieselben
+    /// Befehle, die die Knöpfe schicken.
+    private static func pruefeWoerterbuchfenster() -> Int {
+        var buch = Woerterbuch()
+        let person = buch.anlegen(text: "Thorben Nystrom", kategorie: .person)
+        _ = buch.aliasHinzufuegen("Nystrom", zu: person.id)
+        _ = buch.anlegen(text: "beispiel@example.org", kategorie: .email, automatischErkannt: true)
+
+        var gesichert: Woerterbuch?
+        let fenster = WoerterbuchFenster(
+            woerterbuch: buch,
+            beimSichern: { gesichert = $0 },
+            beimExportieren: { _, _ in }
+        )
+        fenster.window?.layoutIfNeeded()
+        defer { fenster.close() }
+
+        guard let inhalt = fenster.window?.contentView else {
+            print("✗ Wörterbuch: das Fenster hat keinen Inhalt")
+            return 1
+        }
+
+        var fehler = 0
+
+        // Liste: zwei Einträge, einer davon mit Schreibweise, macht drei Zeilen.
+        let tabelle = tabelleSuchen(in: inhalt)
+        if tabelle?.numberOfRows == 3 {
+            print("✓ Wörterbuch: 3 Zeilen, Schreibweise eingerückt unter der Hauptnennung")
+        } else {
+            print("✗ Wörterbuch: \(tabelle?.numberOfRows ?? -1) Zeilen statt 3")
+            fehler += 1
+        }
+
+        guard let editor = editorSuchen(in: inhalt) else {
+            print("✗ Wörterbuch: der Editor fehlt")
+            return fehler + 1
+        }
+
+        // Ohne Auswahl darf nichts passieren.
+        if editor.beiBefehl?(.begriff("Egal")) == nil, gesichert == nil {
+            print("✓ Wörterbuch: ohne Auswahl ändert der Editor nichts")
+        } else {
+            print("✗ Wörterbuch: der Editor hat ohne Auswahl etwas geändert")
+            fehler += 1
+        }
+
+        // Jetzt den Eintrag auswählen und den Tippfehler beheben.
+        fenster.waehle(person.id)
+        if let meldung = editor.beiBefehl?(.begriff("Thorben Nyström")) {
+            print("✗ Wörterbuch: Begriff ändern meldet „\(meldung)\"")
+            fehler += 1
+        } else if gesichert?.eintrag(mitId: person.id)?.text == "Thorben Nyström" {
+            print("✓ Wörterbuch: Begriff geändert und gesichert")
+        } else {
+            print("✗ Wörterbuch: der Begriff wurde nicht übernommen")
+            fehler += 1
+        }
+
+        // Deckname vergeben.
+        if editor.beiBefehl?(.deckname("mandant_a")) == nil,
+           gesichert?.eintrag(mitId: person.id)?.platzhalter == "MANDANT_A" {
+            print("✓ Wörterbuch: Deckname vergeben")
+        } else {
+            print("✗ Wörterbuch: der Deckname wurde nicht übernommen")
+            fehler += 1
+        }
+
+        // Ein ungültiger Name muss abgelehnt werden, ohne etwas zu ändern.
+        let meldung = editor.beiBefehl?(.deckname("MIT LEERZEICHEN"))
+        if meldung != nil, gesichert?.eintrag(mitId: person.id)?.platzhalter == "MANDANT_A" {
+            print("✓ Wörterbuch: ungültiger Deckname abgelehnt, alter bleibt")
+        } else {
+            print("✗ Wörterbuch: ungültiger Deckname ging durch")
+            fehler += 1
+        }
+
+        // Kategorie wechseln, eigener Deckname muss bleiben.
+        if editor.beiBefehl?(.kategorie(.firma)) == nil,
+           gesichert?.eintrag(mitId: person.id)?.kategorie == .firma,
+           gesichert?.eintrag(mitId: person.id)?.platzhalter == "MANDANT_A" {
+            print("✓ Wörterbuch: Typ gewechselt, eigener Deckname bleibt")
+        } else {
+            print("✗ Wörterbuch: der Typwechsel ging schief")
+            fehler += 1
+        }
+
+        // Schreibweise anlegen und wieder löschen.
+        if editor.beiBefehl?(.aliasNeu("Nyström")) == nil,
+           let alias = gesichert?.eintrag(mitId: person.id)?.aliase.last {
+            let vorher = gesichert?.eintrag(mitId: person.id)?.aliase.count ?? 0
+            _ = editor.beiBefehl?(.aliasLoeschen(alias.id))
+            let nachher = gesichert?.eintrag(mitId: person.id)?.aliase.count ?? 0
+            if nachher == vorher - 1 {
+                print("✓ Wörterbuch: Schreibweise angelegt und gelöscht")
+            } else {
+                print("✗ Wörterbuch: die Schreibweise ließ sich nicht löschen")
+                fehler += 1
+            }
+        } else {
+            print("✗ Wörterbuch: die Schreibweise ließ sich nicht anlegen")
+            fehler += 1
+        }
+
+        // Alte Decknamen müssen weiter auflösen.
+        if gesichert?.klartext(fuerPlatzhalter: "PERSON_1") == "Thorben Nyström" {
+            print("✓ Wörterbuch: der ursprüngliche Deckname löst weiter auf")
+        } else {
+            print("✗ Wörterbuch: PERSON_1 löst nicht mehr auf")
+            fehler += 1
+        }
+        return fehler
+    }
+
+    private static func editorSuchen(in ansicht: NSView) -> EintragEditor? {
+        if let treffer = ansicht as? EintragEditor { return treffer }
+        for unter in ansicht.subviews {
+            if let treffer = editorSuchen(in: unter) { return treffer }
+        }
+        return nil
     }
 
     private static func suchzeileSuchen(in ansicht: NSView) -> Textsuche? {
