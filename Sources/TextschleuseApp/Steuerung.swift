@@ -120,13 +120,19 @@ final class Steuerung: NSObject, NSApplicationDelegate {
         meldung.runModal()
     }
 
+    /// Wirft ein noch offenes Popup weg. Nichts davon wandert ins Wörterbuch —
+    /// wer den Kurzbefehl neu drückt, will den alten Text nicht mehr.
+    private func schliesseOffenes() {
+        offenesPopup?.orderOut(nil)
+        offenesPopup = nil
+    }
+
     // MARK: Schützen
 
     @objc private func schuetzeZwischenablage() {
-        guard offenesPopup == nil else {
-            offenesPopup?.makeKeyAndOrderFront(nil)
-            return
-        }
+        // Ein noch offenes Popup wird geschlossen, nicht nach vorn geholt.
+        // Der Kurzbefehl heißt: nimm, was jetzt in der Zwischenablage liegt.
+        schliesseOffenes()
         guard let text = Zwischenablage.lies() else {
             KurzInfo.zeige("In der Zwischenablage steht kein Text.")
             return
@@ -179,10 +185,7 @@ final class Steuerung: NSObject, NSApplicationDelegate {
     // MARK: Rückweg
 
     @objc private func dreheZurueck() {
-        guard offenesPopup == nil else {
-            offenesPopup?.makeKeyAndOrderFront(nil)
-            return
-        }
+        schliesseOffenes()
         guard let text = Zwischenablage.lies() else {
             KurzInfo.zeige("In der Zwischenablage steht kein Text.")
             return

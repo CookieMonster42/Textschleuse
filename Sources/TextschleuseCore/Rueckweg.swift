@@ -58,12 +58,32 @@ public struct RueckwegErgebnis: Sendable {
 /// Auszeichnung drumherum bleibt stehen, ersetzt wird nur der Kern.
 public enum Rueckweg {
 
+    /// Das Muster für automatisch vergebene Namen: Kategoriekürzel, Nummer,
+    /// optional ein Aliasbuchstabe.
     static var muster: String {
         let praefixe = Kategorie.allCases
             .map { NSRegularExpression.escapedPattern(for: $0.praefix) }
             .sorted { $0.count > $1.count }
             .joined(separator: "|")
         return "(?<![\\p{L}\\p{N}])(\(praefixe))[ _\\-]?(\\d+)([A-Za-z]{0,3})(?![\\p{L}\\p{N}])"
+    }
+
+    /// Das Muster für selbst vergebene Decknamen. Die lassen sich nicht aus
+    /// einer Kategorie ableiten, deshalb wird jeder bekannte Name einzeln
+    /// gesucht. Zwischen den Wortteilen darf statt des Unterstrichs auch ein
+    /// Leerzeichen oder Bindestrich stehen — Modelle schreiben `KUNDE NORD`.
+    static func musterFuerEigene(_ namen: [String]) -> String? {
+        let brauchbare = namen
+            .filter { !$0.isEmpty }
+            .sorted { $0.count > $1.count }
+        guard !brauchbare.isEmpty else { return nil }
+
+        let teile = brauchbare.map { name in
+            name.split(separator: "_", omittingEmptySubsequences: true)
+                .map { NSRegularExpression.escapedPattern(for: String($0)) }
+                .joined(separator: "[ _\\-]?")
+        }
+        return "(?<![\\p{L}\\p{N}])(?:\(teile.joined(separator: "|")))(?![\\p{L}\\p{N}])"
     }
 
     public static func analysiere(
@@ -83,16 +103,48 @@ public enum Rueckweg {
                 : nsText.substring(with: suffixBereich).uppercased()
 
             let normal = "\(praefix)_\(nummer)\(suffix)"
-            let klartext = woerterbuch.klartext(fuerPlatzhalter: normal) ?? unbekannte[normal]
-
             funde.append(PlatzhalterFund(
                 bereich: treffer.range,
                 geschrieben: nsText.substring(with: treffer.range),
                 normal: normal,
-                klartext: klartext
+                klartext: woerterbuch.klartext(fuerPlatzhalter: normal) ?? unbekannte[normal]
             ))
         }
 
-        return RueckwegErgebnis(original: text, funde: funde)
+        // Selbst vergebene Namen zusätzlich suchen. Was das Kategoriemuster
+        // schon erwischt hat, fällt hinterher über die Überschneidung raus.
+        let eigene = woerterbuch.alleDecknamen.filter { name in
+            RegexWerkzeug.treffer(muster, in: name as NSString).isEmpty
+        }
+        if let eigenesMuster = musterFuerEigene(Array(eigene)) {
+            for treffer in RegexWerkzeug.treffer(eigenesMuster, in: nsText, optionen: [.caseInsensitive]) {
+                let geschrieben = nsText.substring(with: treffer.range)
+                let normal = geschrieben
+                    .uppercased()
+                    .replacingOccurrences(of: " ", with: "_")
+                    .replacingOccurrences(of: "-", with: "_")
+                funde.append(PlatzhalterFund(
+                    bereich: treffer.range,
+                    geschrieben: geschrieben,
+                    normal: normal,
+                    klartext: woerterbuch.klartext(fuerPlatzhalter: normal) ?? unbekannte[normal]
+                ))
+            }
+        }
+
+        return RueckwegErgebnis(original: text, funde: ohneUeberschneidungen(funde))
+    }
+
+    /// Bei gleicher Stelle gewinnt der längere Treffer. `KUNDE_NORD_2` schlägt
+    /// eine Teilübereinstimmung.
+    private static func ohneUeberschneidungen(_ funde: [PlatzhalterFund]) -> [PlatzhalterFund] {
+        var behalten: [PlatzhalterFund] = []
+        for fund in funde.sorted(by: { $0.bereich.length > $1.bereich.length }) {
+            let kollidiert = behalten.contains {
+                NSIntersectionRange($0.bereich, fund.bereich).length > 0
+            }
+            if !kollidiert { behalten.append(fund) }
+        }
+        return behalten.sorted { $0.bereich.location < $1.bereich.location }
     }
 }

@@ -28,6 +28,15 @@ public struct Eintrag: Codable, Identifiable, Hashable, Sendable {
     public var automatischErkannt: Bool
     public var angelegt: Date
 
+    /// Selbst vergebener Deckname, etwa `KUNDE_NORD` statt `FIRMA_3`. Ist er
+    /// gesetzt, gilt er überall statt der automatischen Nummer.
+    public var eigenerDeckname: String?
+
+    /// Alle Decknamen, unter denen dieser Eintrag schon einmal im Umlauf war.
+    /// Sie bleiben auflösbar, sonst ließe sich eine Antwort auf eine ältere
+    /// Mail nach dem Umbenennen nicht mehr zurückdrehen.
+    public var fruehereDecknamen: [String]
+
     public init(
         id: UUID = UUID(),
         text: String,
@@ -35,7 +44,9 @@ public struct Eintrag: Codable, Identifiable, Hashable, Sendable {
         nummer: Int,
         aliase: [Alias] = [],
         automatischErkannt: Bool = false,
-        angelegt: Date = Date()
+        angelegt: Date = Date(),
+        eigenerDeckname: String? = nil,
+        fruehereDecknamen: [String] = []
     ) {
         self.id = id
         self.text = text
@@ -44,12 +55,42 @@ public struct Eintrag: Codable, Identifiable, Hashable, Sendable {
         self.aliase = aliase
         self.automatischErkannt = automatischErkannt
         self.angelegt = angelegt
+        self.eigenerDeckname = eigenerDeckname
+        self.fruehereDecknamen = fruehereDecknamen
     }
 
-    public var platzhalter: String { "\(kategorie.praefix)_\(nummer)" }
+    /// Von Hand geschrieben statt automatisch abgeleitet: die beiden neuen
+    /// Felder fehlen in Dateien der Version 1, und der abgeleitete Decoder
+    /// bricht bei fehlenden Schlüsseln ab, auch wenn ein Vorgabewert dasteht.
+    public init(from decoder: Decoder) throws {
+        let behaelter = try decoder.container(keyedBy: CodingKeys.self)
+        id = try behaelter.decode(UUID.self, forKey: .id)
+        text = try behaelter.decode(String.self, forKey: .text)
+        kategorie = try behaelter.decode(Kategorie.self, forKey: .kategorie)
+        nummer = try behaelter.decode(Int.self, forKey: .nummer)
+        aliase = try behaelter.decodeIfPresent([Alias].self, forKey: .aliase) ?? []
+        automatischErkannt = try behaelter.decodeIfPresent(Bool.self, forKey: .automatischErkannt) ?? false
+        angelegt = try behaelter.decodeIfPresent(Date.self, forKey: .angelegt) ?? Date()
+        eigenerDeckname = try behaelter.decodeIfPresent(String.self, forKey: .eigenerDeckname)
+        fruehereDecknamen = try behaelter.decodeIfPresent([String].self, forKey: .fruehereDecknamen) ?? []
+    }
+
+    /// Der automatisch vergebene Name. Bleibt auch nach dem Umbenennen
+    /// erhalten, damit die Nummer nicht neu vergeben wird.
+    public var standardDeckname: String { "\(kategorie.praefix)_\(nummer)" }
+
+    public var platzhalter: String { eigenerDeckname ?? standardDeckname }
 
     public func platzhalter(fuer alias: Alias) -> String {
-        "\(kategorie.praefix)_\(nummer)\(alias.suffix)"
+        "\(platzhalter)\(alias.suffix)"
+    }
+
+    /// Jeder Name, unter dem dieser Eintrag in einem Text stehen kann:
+    /// aktueller Deckname, frühere Decknamen, beides je Alias.
+    public var alleDecknamen: [String] {
+        var namen = [platzhalter] + fruehereDecknamen
+        for name in namen { namen += aliase.map { "\(name)\($0.suffix)" } }
+        return Array(Set(namen))
     }
 
     /// Hauptnennung und Aliase in einer Liste, längster Text zuerst. Beim
@@ -183,15 +224,104 @@ public struct Woerterbuch: Codable, Sendable {
     }
 
     /// Löst einen Platzhalter wieder in Klartext auf. `PERSON_7` liefert die
-    /// Hauptnennung, `PERSON_7B` den zugehörigen Alias.
+    /// Hauptnennung, `PERSON_7B` den zugehörigen Alias. Frühere Decknamen
+    /// zählen mit, damit Antworten auf ältere Texte weiter aufgehen.
     public func klartext(fuerPlatzhalter platzhalter: String) -> String? {
+        let gesucht = platzhalter.uppercased()
         for eintrag in eintraege {
-            if eintrag.platzhalter == platzhalter { return eintrag.text }
-            for alias in eintrag.aliase where eintrag.platzhalter(fuer: alias) == platzhalter {
-                return alias.text
+            for name in [eintrag.platzhalter] + eintrag.fruehereDecknamen {
+                if name.uppercased() == gesucht { return eintrag.text }
+                for alias in eintrag.aliase where "\(name)\(alias.suffix)".uppercased() == gesucht {
+                    return alias.text
+                }
             }
         }
         return nil
+    }
+
+    /// Alle Decknamen, die irgendwo im Wörterbuch vergeben sind. Grundlage für
+    /// die Suche im Rückweg und für die Kollisionsprüfung beim Umbenennen.
+    public var alleDecknamen: Set<String> {
+        Set(eintraege.flatMap(\.alleDecknamen))
+    }
+
+    // MARK: Umbenennen
+
+    public enum DecknamenFehler: LocalizedError, Equatable {
+        case leer
+        case ungueltigeZeichen
+        case zuLang(Int)
+        case ohneBuchstabe
+        case vergeben(String)
+
+        public var errorDescription: String? {
+            switch self {
+            case .leer:
+                return "Der Deckname darf nicht leer sein."
+            case .ungueltigeZeichen:
+                return "Erlaubt sind Großbuchstaben, Ziffern und Unterstrich. "
+                    + "Leerzeichen und Umlaute nicht — sonst findet der Rückweg den Namen in der "
+                    + "KI-Antwort nicht mehr sicher wieder."
+            case .zuLang(let hoechstens):
+                return "Höchstens \(hoechstens) Zeichen."
+            case .ohneBuchstabe:
+                return "Mindestens ein Buchstabe muss dabei sein."
+            case .vergeben(let name):
+                return "\(name) ist schon vergeben."
+            }
+        }
+    }
+
+    static let hoechstlaengeDeckname = 40
+
+    /// Prüft einen Decknamen und liefert ihn in der Form, in der er gespeichert
+    /// wird. `eigenerId` bleibt bei der Kollisionsprüfung außen vor, sonst
+    /// stößt sich ein Eintrag an sich selbst.
+    public func pruefeDeckname(_ eingabe: String, fuer eigenerId: UUID?) throws -> String {
+        let name = eingabe.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !name.isEmpty else { throw DecknamenFehler.leer }
+        guard name.count <= Self.hoechstlaengeDeckname else {
+            throw DecknamenFehler.zuLang(Self.hoechstlaengeDeckname)
+        }
+        guard name.allSatisfy({ $0.isASCII && ($0.isUppercase || $0.isNumber || $0 == "_") }) else {
+            throw DecknamenFehler.ungueltigeZeichen
+        }
+        guard name.contains(where: \.isLetter) else { throw DecknamenFehler.ohneBuchstabe }
+
+        let fremde = eintraege
+            .filter { $0.id != eigenerId }
+            .flatMap(\.alleDecknamen)
+            .map { $0.uppercased() }
+        guard !fremde.contains(name) else { throw DecknamenFehler.vergeben(name) }
+        return name
+    }
+
+    /// Gibt einem Eintrag einen neuen Decknamen. Der bisherige bleibt als
+    /// früherer Name auflösbar.
+    @discardableResult
+    public mutating func umbenennen(_ eintragId: UUID, auf eingabe: String) throws -> String {
+        let name = try pruefeDeckname(eingabe, fuer: eintragId)
+        guard let index = eintraege.firstIndex(where: { $0.id == eintragId }) else { return name }
+
+        let bisher = eintraege[index].platzhalter
+        guard bisher != name else { return name }
+        if !eintraege[index].fruehereDecknamen.contains(bisher) {
+            eintraege[index].fruehereDecknamen.append(bisher)
+        }
+        eintraege[index].eigenerDeckname = name
+        return name
+    }
+
+    /// Nimmt den eigenen Decknamen zurück. Der Eintrag heißt danach wieder
+    /// `PERSON_7`.
+    public mutating func decknameZuruecksetzen(_ eintragId: UUID) {
+        guard let index = eintraege.firstIndex(where: { $0.id == eintragId }),
+              let bisher = eintraege[index].eigenerDeckname
+        else { return }
+        if !eintraege[index].fruehereDecknamen.contains(bisher) {
+            eintraege[index].fruehereDecknamen.append(bisher)
+        }
+        eintraege[index].eigenerDeckname = nil
     }
 
     /// Alle Personen, deren Hauptnennung auf denselben Nachnamen endet wie der

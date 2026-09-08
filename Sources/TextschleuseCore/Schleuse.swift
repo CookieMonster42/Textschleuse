@@ -55,7 +55,7 @@ public enum Schleuse {
 
         for index in funde.indices {
             switch funde[index].quelle {
-            case .woerterbuch:
+            case .woerterbuch, .markierung:
                 break  // Platzhalter steht schon
 
             case .regel:
@@ -224,6 +224,155 @@ public enum Schleuse {
             analyse.funde[weiterer].platzhalter = eintrag.platzhalter(fuer: alias)
             analyse.funde[weiterer].sicherheit = .sicher
             analyse.funde[weiterer].bestaetigt = true
+        }
+    }
+
+    // MARK: Freie Markierung
+
+    /// Macht aus einer Textmarkierung eine Fundstelle. Was die Regeln und die
+    /// Heuristik übersehen haben, holst du damit selbst.
+    ///
+    /// Bestehende Funde, die in der Markierung liegen, verschwinden: du hast
+    /// gerade ausdrücklich gesagt, was hier gilt.
+    @discardableResult
+    public static func markiere(
+        bereich: NSRange,
+        als kategorie: Kategorie,
+        merken: Bool,
+        in analyse: inout Analyse
+    ) -> UUID? {
+        let nsText = analyse.original as NSString
+        let geputzt = bereinige(bereich, in: nsText)
+        guard geputzt.length > 0 else { return nil }
+
+        let text = nsText.substring(with: geputzt)
+        analyse.funde.removeAll { NSIntersectionRange($0.bereich, geputzt).length > 0 }
+
+        var fund = Fund(
+            bereich: geputzt,
+            text: text,
+            kategorie: kategorie,
+            sicherheit: .sicher,
+            quelle: .markierung
+        )
+        fund.bestaetigt = true
+
+        if merken {
+            let eintrag = analyse.woerterbuch.eintrag(fuerText: text)
+                ?? analyse.woerterbuch.anlegen(text: text, kategorie: kategorie)
+            fund.eintragId = eintrag.id
+            fund.platzhalter = eintrag.platzhalter
+        } else {
+            fund.platzhalter = freierPlatzhalter(fuer: kategorie, in: analyse)
+            analyse.unbekannte[fund.platzhalter] = text
+        }
+
+        analyse.funde.append(fund)
+        analyse.funde.sort { $0.bereich.location < $1.bereich.location }
+
+        // Gleichlautende Stellen im selben Text ziehen mit.
+        if merken, let eintragId = fund.eintragId {
+            uebernimmFuerGleichlautende(text: text, eintragId: eintragId, in: &analyse)
+        }
+        return fund.id
+    }
+
+    /// Schneidet Leerzeichen und Satzzeichen an den Rändern weg. Wer mit der
+    /// Maus markiert, erwischt fast immer ein Leerzeichen zu viel.
+    private static func bereinige(_ bereich: NSRange, in text: NSString) -> NSRange {
+        guard bereich.location != NSNotFound,
+              bereich.length > 0,
+              NSMaxRange(bereich) <= text.length
+        else { return NSRange(location: 0, length: 0) }
+
+        let unerwuenscht = CharacterSet.whitespacesAndNewlines
+            .union(CharacterSet(charactersIn: ".,;:!?()[]{}\"'„“”‚‘’«»–—"))
+
+        var start = bereich.location
+        var ende = NSMaxRange(bereich)
+        while start < ende, let zeichen = text.substring(with: NSRange(location: start, length: 1)).unicodeScalars.first,
+              unerwuenscht.contains(zeichen) {
+            start += 1
+        }
+        while ende > start, let zeichen = text.substring(with: NSRange(location: ende - 1, length: 1)).unicodeScalars.first,
+              unerwuenscht.contains(zeichen) {
+            ende -= 1
+        }
+        return NSRange(location: start, length: ende - start)
+    }
+
+    /// Ein Platzhalter, der in diesem Text noch frei ist. Für Markierungen, die
+    /// nicht ins Wörterbuch sollen.
+    private static func freierPlatzhalter(fuer kategorie: Kategorie, in analyse: Analyse) -> String {
+        let belegt = Set(analyse.funde.map(\.platzhalter))
+            .union(analyse.unbekannte.keys)
+            .union(analyse.woerterbuch.alleDecknamen)
+        var nummer = analyse.woerterbuch.naechsteNummern[kategorie.rawValue] ?? 1
+        while belegt.contains("\(kategorie.praefix)_\(nummer)") { nummer += 1 }
+        return "\(kategorie.praefix)_\(nummer)"
+    }
+
+    private static func uebernimmFuerGleichlautende(
+        text: String,
+        eintragId: UUID,
+        in analyse: inout Analyse
+    ) {
+        guard let eintrag = analyse.woerterbuch.eintrag(mitId: eintragId) else { return }
+        let gesucht = text.lowercased()
+        for index in analyse.funde.indices
+        where analyse.funde[index].text.lowercased() == gesucht && analyse.funde[index].eintragId == nil {
+            analyse.unbekannte.removeValue(forKey: analyse.funde[index].platzhalter)
+            analyse.funde[index].kategorie = eintrag.kategorie
+            analyse.funde[index].eintragId = eintrag.id
+            analyse.funde[index].platzhalter = eintrag.platzhalter
+            analyse.funde[index].sicherheit = .sicher
+            analyse.funde[index].bestaetigt = true
+        }
+    }
+
+    // MARK: Deckname
+
+    /// Gibt der Fundstelle einen anderen Decknamen.
+    ///
+    /// Hängt die Fundstelle an einem Wörterbucheintrag, wird der Eintrag
+    /// umbenannt und der bisherige Name bleibt auflösbar. Sonst gilt der Name
+    /// nur für diesen Text.
+    public static func benenneUm(
+        fundId: UUID,
+        auf name: String,
+        in analyse: inout Analyse
+    ) throws {
+        guard let index = analyse.funde.firstIndex(where: { $0.id == fundId }) else { return }
+
+        guard let eintragId = analyse.funde[index].eintragId else {
+            let geprueft = try analyse.woerterbuch.pruefeDeckname(name, fuer: nil)
+            let anderweitigBelegt = analyse.funde
+                .filter { $0.id != fundId }
+                .contains { $0.platzhalter.uppercased() == geprueft }
+            guard !anderweitigBelegt else {
+                throw Woerterbuch.DecknamenFehler.vergeben(geprueft)
+            }
+            let bisher = analyse.funde[index].platzhalter
+            analyse.unbekannte.removeValue(forKey: bisher)
+            analyse.funde[index].platzhalter = geprueft
+            analyse.unbekannte[geprueft] = analyse.funde[index].text
+            return
+        }
+
+        try analyse.woerterbuch.umbenennen(eintragId, auf: name)
+        aktualisierePlatzhalter(fuerEintrag: eintragId, in: &analyse)
+    }
+
+    /// Zieht die Platzhalter aller Funde nach, die an einem Eintrag hängen.
+    static func aktualisierePlatzhalter(fuerEintrag eintragId: UUID, in analyse: inout Analyse) {
+        guard let eintrag = analyse.woerterbuch.eintrag(mitId: eintragId) else { return }
+        for index in analyse.funde.indices where analyse.funde[index].eintragId == eintragId {
+            let text = analyse.funde[index].text.lowercased()
+            if let alias = eintrag.aliase.first(where: { $0.text.lowercased() == text }) {
+                analyse.funde[index].platzhalter = eintrag.platzhalter(fuer: alias)
+            } else {
+                analyse.funde[index].platzhalter = eintrag.platzhalter
+            }
         }
     }
 

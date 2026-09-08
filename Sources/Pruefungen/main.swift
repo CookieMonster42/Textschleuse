@@ -433,4 +433,231 @@ Pruefstand.pruefe("Wörterbuch: gelöschte Nummern werden nicht neu vergeben") {
     Pruefstand.gleich(zweiter.platzhalter, "PERSON_2", "die 1 bleibt verbrannt")
 }
 
+// MARK: Decknamen
+
+Pruefstand.pruefe("Deckname: Prüfung der Eingabe") {
+    var buch = Woerterbuch()
+    let eintrag = buch.anlegen(text: "Beispielbank Nord eG", kategorie: .firma)
+
+    Pruefstand.gleich(try? buch.pruefeDeckname("kunde_nord", fuer: eintrag.id), "KUNDE_NORD",
+                      "Kleinschreibung wird hochgezogen")
+    Pruefstand.gleich(try? buch.pruefeDeckname("  HAUSBANK  ", fuer: eintrag.id), "HAUSBANK",
+                      "Leerraum am Rand fällt weg")
+
+    for (eingabe, erwartet) in [
+        ("", Woerterbuch.DecknamenFehler.leer),
+        ("KUNDE NORD", .ungueltigeZeichen),
+        ("KUNDE-NORD", .ungueltigeZeichen),
+        ("MÜLLER", .ungueltigeZeichen),
+        ("123", .ohneBuchstabe),
+    ] {
+        do {
+            _ = try buch.pruefeDeckname(eingabe, fuer: eintrag.id)
+            Pruefstand.wahr(false, "„\(eingabe)\" wird abgelehnt")
+        } catch let fehler as Woerterbuch.DecknamenFehler {
+            Pruefstand.gleich(fehler, erwartet, "„\(eingabe)\" wird abgelehnt")
+        } catch {
+            Pruefstand.wahr(false, "„\(eingabe)\": unerwarteter Fehler \(error)")
+        }
+    }
+}
+
+Pruefstand.pruefe("Deckname: schon vergeben") {
+    var buch = Woerterbuch()
+    let erster = buch.anlegen(text: "Anna Beispiel", kategorie: .person)
+    let zweiter = buch.anlegen(text: "Bernd Beispiel", kategorie: .person)
+    _ = try? buch.umbenennen(erster.id, auf: "VORSTAND")
+
+    do {
+        _ = try buch.pruefeDeckname("VORSTAND", fuer: zweiter.id)
+        Pruefstand.wahr(false, "ein zweites Mal VORSTAND wird abgelehnt")
+    } catch let fehler as Woerterbuch.DecknamenFehler {
+        Pruefstand.gleich(fehler, .vergeben("VORSTAND"), "ein zweites Mal VORSTAND wird abgelehnt")
+    } catch {
+        Pruefstand.wahr(false, "unerwarteter Fehler \(error)")
+    }
+
+    // Der Eintrag darf seinen eigenen Namen behalten.
+    Pruefstand.gleich(try? buch.pruefeDeckname("VORSTAND", fuer: erster.id), "VORSTAND",
+                      "der Eintrag stößt sich nicht an sich selbst")
+}
+
+Pruefstand.pruefe("Deckname: alter Name bleibt auflösbar") {
+    var buch = Woerterbuch()
+    let eintrag = buch.anlegen(text: "Thorben Nyström", kategorie: .person)
+    _ = buch.aliasHinzufuegen("Nyström", zu: eintrag.id)
+    Pruefstand.gleich(buch.eintrag(mitId: eintrag.id)?.platzhalter, "PERSON_1", "vorher")
+
+    _ = try? buch.umbenennen(eintrag.id, auf: "MANDANT_A")
+    Pruefstand.gleich(buch.eintrag(mitId: eintrag.id)?.platzhalter, "MANDANT_A", "nachher")
+
+    // Beide Namen lösen auf: eine Antwort auf die ältere Mail geht weiter auf.
+    Pruefstand.gleich(buch.klartext(fuerPlatzhalter: "MANDANT_A"), "Thorben Nyström", "neuer Name")
+    Pruefstand.gleich(buch.klartext(fuerPlatzhalter: "PERSON_1"), "Thorben Nyström", "alter Name")
+    Pruefstand.gleich(buch.klartext(fuerPlatzhalter: "MANDANT_AB"), "Nyström", "Alias unter neuem Namen")
+    Pruefstand.gleich(buch.klartext(fuerPlatzhalter: "PERSON_1B"), "Nyström", "Alias unter altem Namen")
+}
+
+Pruefstand.pruefe("Deckname: Rückweg findet freie Namen") {
+    var buch = Woerterbuch()
+    let eintrag = buch.anlegen(text: "Beispielbank Nord eG", kategorie: .firma)
+    _ = try? buch.umbenennen(eintrag.id, auf: "HAUSBANK")
+
+    for variante in ["HAUSBANK", "**HAUSBANK**", "Hausbank", "hausbank"] {
+        let ergebnis = Rueckweg.analysiere(
+            "Die \(variante) hat bestätigt.",
+            woerterbuch: buch,
+            unbekannte: [:]
+        )
+        Pruefstand.gleich(ergebnis.aufgeloest.count, 1, "Variante \(variante) erkannt")
+        Pruefstand.enthaelt(ergebnis.ergebnis, "Beispielbank Nord eG", "Variante \(variante) aufgelöst")
+    }
+
+    // Mehrteiliger Name, vom Modell mit Leerzeichen geschrieben.
+    let zweiter = buch.anlegen(text: "Sparkasse Süd", kategorie: .firma)
+    _ = try? buch.umbenennen(zweiter.id, auf: "KUNDE_NORD")
+    let ergebnis = Rueckweg.analysiere("Bitte KUNDE NORD anschreiben.", woerterbuch: buch)
+    Pruefstand.enthaelt(ergebnis.ergebnis, "Sparkasse Süd", "KUNDE NORD mit Leerzeichen")
+}
+
+Pruefstand.pruefe("Deckname: zurücksetzen") {
+    var buch = Woerterbuch()
+    let eintrag = buch.anlegen(text: "Anna Beispiel", kategorie: .person)
+    _ = try? buch.umbenennen(eintrag.id, auf: "CHEFIN")
+    buch.decknameZuruecksetzen(eintrag.id)
+
+    Pruefstand.gleich(buch.eintrag(mitId: eintrag.id)?.platzhalter, "PERSON_1", "wieder die Nummer")
+    Pruefstand.gleich(buch.klartext(fuerPlatzhalter: "CHEFIN"), "Anna Beispiel", "der alte Name geht weiter auf")
+}
+
+// MARK: Freie Markierung
+
+Pruefstand.pruefe("Markierung: merken") {
+    let text = "Das Projekt Nordlicht läuft seit März."
+    var analyse = Schleuse.analysiere(text, woerterbuch: Woerterbuch())
+    let bereich = (text as NSString).range(of: "Nordlicht")
+
+    let kennung = Schleuse.markiere(bereich: bereich, als: .begriff, merken: true, in: &analyse)
+    Pruefstand.wahr(kennung != nil, "die Markierung wird angenommen")
+    Pruefstand.enthaelt(Schleuse.geschuetzterText(analyse), "BEGRIFF_1", "Platzhalter steht im Text")
+    Pruefstand.enthaeltNicht(Schleuse.geschuetzterText(analyse), "Nordlicht", "Klartext ist raus")
+    Pruefstand.gleich(analyse.woerterbuch.eintrag(fuerText: "Nordlicht")?.kategorie, .begriff,
+                      "der Begriff liegt im Wörterbuch")
+
+    // Beim nächsten Text greift er von selbst.
+    let spaeter = Schleuse.analysiere("Nordlicht ist abgeschlossen.", woerterbuch: analyse.woerterbuch)
+    Pruefstand.wahr(spaeter.aktiveFunde.contains { $0.quelle == .woerterbuch },
+                    "gemerkt heißt: beim nächsten Mal ohne Nachfrage")
+}
+
+Pruefstand.pruefe("Markierung: nur dieser Text") {
+    let text = "Das Projekt Nordlicht läuft."
+    var analyse = Schleuse.analysiere(text, woerterbuch: Woerterbuch())
+    let bereich = (text as NSString).range(of: "Nordlicht")
+
+    Schleuse.markiere(bereich: bereich, als: .begriff, merken: false, in: &analyse)
+    Pruefstand.gleich(analyse.woerterbuch.eintraege.count, 0, "nichts im Wörterbuch")
+    Pruefstand.enthaeltNicht(Schleuse.geschuetzterText(analyse), "Nordlicht", "trotzdem ersetzt")
+    Pruefstand.wahr(analyse.unbekannte.values.contains("Nordlicht"),
+                    "steht in der Sitzungszuordnung, damit der Rückweg ihn kennt")
+}
+
+Pruefstand.pruefe("Markierung: Ränder werden geputzt") {
+    let text = "Ansprechpartner ist Nordlicht, bitte melden."
+    var analyse = Schleuse.analysiere(text, woerterbuch: Woerterbuch())
+    // Mit der Maus erwischt man fast immer ein Leerzeichen und das Komma mit.
+    let grob = (text as NSString).range(of: " Nordlicht, ")
+
+    let kennung = Schleuse.markiere(bereich: grob, als: .begriff, merken: true, in: &analyse)
+    let fund = analyse.funde.first { $0.id == kennung }
+    Pruefstand.gleich(fund?.text, "Nordlicht", "Leerzeichen und Komma fallen weg")
+}
+
+Pruefstand.pruefe("Markierung: verdrängt was darunter liegt") {
+    var analyse = Schleuse.analysiere(Beispieltexte.bankmail, woerterbuch: Woerterbuch())
+    let vorher = analyse.aktiveFunde.count
+    guard let mail = analyse.regeltreffer.first(where: { $0.kategorie == .email }) else {
+        Pruefstand.wahr(false, "Adresse gefunden")
+        return
+    }
+
+    // Ein größerer Bereich, der die Adresse einschließt.
+    let umfassend = NSRange(location: mail.bereich.location, length: mail.bereich.length + 3)
+    Schleuse.markiere(bereich: umfassend, als: .begriff, merken: false, in: &analyse)
+
+    Pruefstand.gleich(analyse.aktiveFunde.count, vorher, "der alte Fund weicht, der neue tritt an seine Stelle")
+    Pruefstand.falsch(analyse.funde.contains { $0.id == mail.id }, "der überdeckte Fund ist weg")
+}
+
+Pruefstand.pruefe("Markierung: leere Auswahl tut nichts") {
+    let text = "Ein kurzer Text."
+    var analyse = Schleuse.analysiere(text, woerterbuch: Woerterbuch())
+    let vorher = analyse.funde.count
+
+    let leer = NSRange(location: 4, length: 0)
+    let nurLeerzeichen = (text as NSString).range(of: " ")
+    let nurSatzzeichen = (text as NSString).range(of: ".")
+
+    for (bereich, was) in [(leer, "leere Auswahl"), (nurLeerzeichen, "nur ein Leerzeichen"), (nurSatzzeichen, "nur ein Punkt")] {
+        Pruefstand.wahr(
+            Schleuse.markiere(bereich: bereich, als: .person, merken: true, in: &analyse) == nil,
+            "\(was) wird abgelehnt"
+        )
+    }
+    Pruefstand.gleich(analyse.funde.count, vorher, "nichts hinzugekommen")
+}
+
+Pruefstand.pruefe("Umbenennen aus dem Popup heraus") {
+    let text = "Das Projekt Nordlicht läuft."
+    var analyse = Schleuse.analysiere(text, woerterbuch: Woerterbuch())
+    let bereich = (text as NSString).range(of: "Nordlicht")
+    guard let kennung = Schleuse.markiere(bereich: bereich, als: .begriff, merken: true, in: &analyse) else {
+        Pruefstand.wahr(false, "Markierung angelegt")
+        return
+    }
+
+    try? Schleuse.benenneUm(fundId: kennung, auf: "projekt_n", in: &analyse)
+    Pruefstand.enthaelt(Schleuse.geschuetzterText(analyse), "PROJEKT_N", "der neue Name steht im Text")
+
+    let zurueck = Rueckweg.analysiere(
+        Schleuse.geschuetzterText(analyse),
+        woerterbuch: analyse.woerterbuch,
+        unbekannte: analyse.unbekannte
+    )
+    Pruefstand.gleich(zurueck.ergebnis, text, "und der Rückweg geht auf")
+}
+
+Pruefstand.pruefe("Umbenennen ohne Wörterbucheintrag") {
+    let text = "Das Projekt Nordlicht läuft."
+    var analyse = Schleuse.analysiere(text, woerterbuch: Woerterbuch())
+    let bereich = (text as NSString).range(of: "Nordlicht")
+    guard let kennung = Schleuse.markiere(bereich: bereich, als: .begriff, merken: false, in: &analyse) else {
+        Pruefstand.wahr(false, "Markierung angelegt")
+        return
+    }
+
+    try? Schleuse.benenneUm(fundId: kennung, auf: "PROJEKT_N", in: &analyse)
+    Pruefstand.enthaelt(Schleuse.geschuetzterText(analyse), "PROJEKT_N", "der Name gilt für diesen Text")
+    Pruefstand.gleich(analyse.unbekannte["PROJEKT_N"], "Nordlicht", "und steht in der Sitzungszuordnung")
+    Pruefstand.gleich(analyse.woerterbuch.eintraege.count, 0, "das Wörterbuch bleibt unberührt")
+}
+
+Pruefstand.pruefe("Alte Datei ohne die neuen Felder lädt") {
+    // Eine Datei aus Version 1: eigenerDeckname und fruehereDecknamen fehlen.
+    let alt = """
+        {"version":1,"naechsteNummern":{"person":2},"eintraege":[
+        {"id":"11111111-1111-1111-1111-111111111111","text":"Anna Beispiel",
+         "kategorie":"person","nummer":1,"aliase":[],"automatischErkannt":false,
+         "angelegt":"2026-01-01T00:00:00Z"}]}
+        """
+    do {
+        let buch = try JSONDecoder.textschleusePruefung.decode(Woerterbuch.self, from: Data(alt.utf8))
+        Pruefstand.gleich(buch.eintraege.count, 1, "Eintrag gelesen")
+        Pruefstand.gleich(buch.eintraege.first?.platzhalter, "PERSON_1", "Deckname wie gehabt")
+        Pruefstand.gleich(buch.eintraege.first?.fruehereDecknamen.count, 0, "keine früheren Namen")
+    } catch {
+        Pruefstand.wahr(false, "alte Datei lädt (\(error))")
+    }
+}
+
 Pruefstand.bilanzUndEnde()
