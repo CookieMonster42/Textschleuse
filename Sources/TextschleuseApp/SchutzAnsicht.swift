@@ -199,8 +199,8 @@ final class SchutzAnsicht: NSView {
 
         let verwerfen = NSButton(title: "Verwerfen (⌫)", target: self, action: #selector(verwerfenGeklickt))
         verwerfen.toolTip = "Rücktaste macht dasselbe"
-        let gruppe = NSButton(title: "Zur Gruppe (G)", target: self, action: #selector(gruppeGeklickt))
-        gruppe.toolTip = "Taste G macht dasselbe"
+        let gruppe = NSButton(title: "Gehört zu … (G)", target: self, action: #selector(gruppeGeklickt))
+        gruppe.toolTip = "Als weitere Schreibweise an einen bekannten Eintrag hängen. Taste G macht dasselbe."
         let neu = NSButton(title: "Neuer Text (⌘N)", target: self, action: #selector(neuEinlesen))
         neu.toolTip = "Liest, was jetzt in der Zwischenablage liegt. Der bisherige Text wird verworfen."
         bearbeitenKnopf = NSButton(title: "Text bearbeiten (⌘E)", target: self, action: #selector(bearbeitenUmschalten))
@@ -239,7 +239,7 @@ final class SchutzAnsicht: NSView {
         )
 
         if let gewaehlt, let bereich = bereiche[gewaehlt] {
-            textAnsicht.scrollRangeToVisible(bereich)
+            springeZu(bereich)
         }
         // Der Text ist neu aufgebaut, die alten Trefferbereiche zeigen ins Leere.
         suche.aktualisiere()
@@ -309,11 +309,14 @@ final class SchutzAnsicht: NSView {
         let fund = aktuellerFund
         for ansicht in knopfleiste.arrangedSubviews {
             guard let knopf = ansicht as? NSButton else { continue }
-            if knopf.title.hasPrefix("Zur Gruppe") {
-                knopf.isEnabled = fund?.gruppenVorschlag != nil
+            if knopf.title.hasPrefix("Gehört zu") {
+                // Geht auch ohne Vorschlag: du weißt oft besser als die
+                // Heuristik, wer gemeint ist.
+                knopf.isEnabled = (fund != nil || hatFreieMarkierung)
+                    && !analyse.woerterbuch.eintraege.isEmpty
                 if let vorschlag = fund?.gruppenVorschlag,
                    let eintrag = analyse.woerterbuch.eintrag(mitId: vorschlag) {
-                    knopf.toolTip = "Als weitere Schreibweise zu \(eintrag.text) (\(eintrag.platzhalter))"
+                    knopf.toolTip = "Vorschlag: \(eintrag.text) (\(eintrag.platzhalter))"
                 }
             } else {
                 knopf.isEnabled = fund != nil || hatFreieMarkierung
@@ -442,6 +445,20 @@ final class SchutzAnsicht: NSView {
         aktualisiere()
     }
 
+    /// Rollt zu einer Stelle und lässt sie kurz aufblitzen.
+    ///
+    /// Ohne `ensureLayout` weiß die Textansicht noch nicht, wo die Stelle
+    /// liegt: der Text ist gerade erst gesetzt worden, gesetzt ist er aber
+    /// noch nicht. Dann rollt sie nirgendwohin.
+    private func springeZu(_ bereich: NSRange) {
+        guard let layout = textAnsicht.layoutManager,
+              let behaelter = textAnsicht.textContainer
+        else { return }
+        layout.ensureLayout(for: behaelter)
+        textAnsicht.scrollRangeToVisible(bereich)
+        textAnsicht.showFindIndicator(for: bereich)
+    }
+
     private func waehleFund(_ kennung: UUID) {
         guard let index = reihenfolge.firstIndex(of: kennung) else { return }
         auswahl = index
@@ -524,10 +541,51 @@ final class SchutzAnsicht: NSView {
         meldung.isHidden = false
     }
 
+    /// Hängt die Nennung an einen bekannten Eintrag. Fragt, an welchen — der
+    /// Heuristikvorschlag ist dabei nur vorausgewählt, nicht gesetzt.
     private func gruppeUebernehmen() {
-        guard let fund = aktuellerFund, let ziel = fund.gruppenVorschlag else { return }
-        Schleuse.alsAliasZuordnen(fundId: fund.id, zu: ziel, in: &analyse)
-        weiterZurNaechstenLuecke()
+        let nennung: String
+        let bereich: NSRange?
+        if let markierung = freieMarkierung {
+            nennung = (analyse.original as NSString).substring(with: markierung)
+            bereich = markierung
+        } else if let fund = aktuellerFund {
+            nennung = fund.text
+            bereich = nil
+        } else {
+            return
+        }
+
+        guard let ziel = EintragWaehler.frage(
+            woerterbuch: analyse.woerterbuch,
+            fuer: nennung,
+            vorschlag: aktuellerFund?.gruppenVorschlag
+        ) else { return }
+
+        let vorher = analyse.aktiveFunde.count
+        if let bereich {
+            guard let neue = Schleuse.markiereAlsSchreibweise(
+                bereich: bereich,
+                zu: ziel.id,
+                in: &analyse
+            ) else {
+                zeigeMeldung("Das ließ sich nicht zuordnen.")
+                return
+            }
+            textAnsicht.setSelectedRange(NSRange(location: 0, length: 0))
+            aktualisiere()
+            waehleFund(neue)
+        } else if let fund = aktuellerFund {
+            Schleuse.alsAliasZuordnen(fundId: fund.id, zu: ziel.id, in: &analyse)
+            aktualisiere()
+        }
+
+        let dazu = analyse.aktiveFunde.count - vorher - (bereich == nil ? 0 : 1)
+        var satz = "Als weitere Schreibweise von \(ziel.text) übernommen"
+        if dazu > 0 { satz += ", \(dazu) weitere Stelle(n) mitgezogen" }
+        meldung.textColor = .secondaryLabelColor
+        meldung.stringValue = satz + "."
+        meldung.isHidden = false
     }
 
     private func verwerfeAktuellen() {
@@ -541,6 +599,22 @@ final class SchutzAnsicht: NSView {
     func bearbeitenUmschaltenFuerPruefung() { bearbeitenUmschalten() }
     func leerenFuerPruefung() { leeren() }
     func setzeBearbeitungstextFuerPruefung(_ text: String) { bearbeitung.text.string = text }
+    func waehleFundFuerPruefung(_ kennung: UUID) { waehleFund(kennung) }
+
+    /// Liegt die Fundstelle im sichtbaren Ausschnitt? Genau das ist gemeint,
+    /// wenn der Text zur angeklickten Stelle springen soll.
+    func fundIstSichtbarFuerPruefung(_ kennung: UUID) -> Bool {
+        guard let bereich = bereiche[kennung],
+              let layout = textAnsicht.layoutManager,
+              let behaelter = textAnsicht.textContainer
+        else { return false }
+        layout.ensureLayout(for: behaelter)
+        let zeichen = layout.glyphRange(forCharacterRange: bereich, actualCharacterRange: nil)
+        var rahmen = layout.boundingRect(forGlyphRange: zeichen, in: behaelter)
+        rahmen.origin.x += textAnsicht.textContainerOrigin.x
+        rahmen.origin.y += textAnsicht.textContainerOrigin.y
+        return textAnsicht.visibleRect.intersects(rahmen)
+    }
 
     // MARK: Bearbeiten
 
