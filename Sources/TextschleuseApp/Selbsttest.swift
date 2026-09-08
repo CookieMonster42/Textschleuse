@@ -23,6 +23,7 @@ enum Selbsttest {
         fehler += pruefeKeychain()
         fehler += pruefeZwischenablage()
         fehler += pruefeKurzbefehl()
+        fehler += pruefeDarstellung()
 
         print("")
         print(fehler == 0 ? "Alles in Ordnung." : "\(fehler) Punkt(e) fehlgeschlagen.")
@@ -67,6 +68,78 @@ enum Selbsttest {
         }
         print("✓ Zwischenablage: schreiben und lesen")
         return 0
+    }
+
+    /// Baut das Popup wirklich auf und misst, was darin steht. Ein leeres
+    /// Textfeld sieht man auf dem Bildschirm sofort, aber erst, wenn man
+    /// hinschaut — das hier fällt beim Bauen auf.
+    private static func pruefeDarstellung() -> Int {
+        let probe = """
+            Sehr geehrter Herr Nyström, anbei die Unterlagen zur Kontoverbindung \
+            DE89 3704 0044 0532 0130 00. Rückfragen an almut.weidenbach@example.org \
+            oder 0621 1234567.
+            """
+        let analyse = Schleuse.analysiere(probe, woerterbuch: Woerterbuch())
+        guard !analyse.funde.isEmpty else {
+            print("✗ Darstellung: im Probetext nichts gefunden")
+            return 1
+        }
+
+        var fehler = 0
+        let popup = SchutzPopup(analyse: analyse) { _ in }
+        popup.layoutIfNeeded()
+
+        guard let inhalt = popup.contentView else {
+            print("✗ Darstellung: das Fenster hat keinen Inhalt")
+            return 1
+        }
+
+        // Kein Textfeld darf leer sein, und die Textfläche muss den größten
+        // Teil der Höhe bekommen.
+        let flaeche = rollflaecheSuchen(in: inhalt)
+        let text = flaeche?.documentView as? NSTextView
+
+        if let text, !text.string.isEmpty {
+            print("✓ Darstellung: \(text.string.count) Zeichen im Textfeld, "
+                + "\(analyse.funde.count) Fundstellen")
+        } else {
+            print("✗ Darstellung: das Textfeld ist leer")
+            fehler += 1
+        }
+
+        if let flaeche {
+            let anteil = flaeche.frame.height / inhalt.frame.height
+            if anteil > 0.4 {
+                print(String(format: "✓ Darstellung: Textfläche belegt %.0f %% der Fensterhöhe", anteil * 100))
+            } else {
+                print(String(format: "✗ Darstellung: Textfläche belegt nur %.0f %% der Fensterhöhe", anteil * 100))
+                fehler += 1
+            }
+        }
+
+        // Sitzt der Inhalt tatsächlich im Fenster oder ist er in eine Ecke
+        // zusammengefallen?
+        let fensterflaeche = popup.frame.width * popup.frame.height
+        let inhaltsflaeche = inhalt.frame.width * inhalt.frame.height
+        if inhaltsflaeche > fensterflaeche * 0.9 {
+            print("✓ Darstellung: der Inhalt füllt das Fenster")
+        } else {
+            print("✗ Darstellung: der Inhalt füllt das Fenster nicht "
+                + "(\(Int(inhalt.frame.width))×\(Int(inhalt.frame.height)) "
+                + "in \(Int(popup.frame.width))×\(Int(popup.frame.height)))")
+            fehler += 1
+        }
+
+        popup.orderOut(nil)
+        return fehler
+    }
+
+    private static func rollflaecheSuchen(in ansicht: NSView) -> NSScrollView? {
+        if let rolle = ansicht as? NSScrollView, rolle.documentView is NSTextView { return rolle }
+        for unter in ansicht.subviews {
+            if let treffer = rollflaecheSuchen(in: unter) { return treffer }
+        }
+        return nil
     }
 
     private static func pruefeKurzbefehl() -> Int {

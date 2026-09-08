@@ -15,8 +15,9 @@ final class RueckwegPopup: TastaturPanel {
 
     private let kopfzeile = NSTextField(labelWithString: "")
     private let warnzeile = NSTextField(labelWithString: "")
-    private let textAnsicht = NSTextView()
-    private let rollflaeche = NSScrollView()
+    private let flaeche = Textflaeche.bauen()
+    private var textAnsicht: NSTextView { flaeche.text }
+    private var rollflaeche: NSScrollView { flaeche.rolle }
     private let fusszeile = NSTextField(labelWithString: "⏎ Kopieren · ⎋ Abbrechen")
 
     init(ergebnis: RueckwegErgebnis, abschluss: @escaping (Ausgang) -> Void) {
@@ -45,17 +46,7 @@ final class RueckwegPopup: TastaturPanel {
             warnzeile.textColor = .systemRed
         }
 
-        textAnsicht.isEditable = false
-        textAnsicht.isSelectable = true
-        textAnsicht.drawsBackground = false
-        textAnsicht.textContainerInset = NSSize(width: 10, height: 10)
         textAnsicht.textStorage?.setAttributedString(aufbereiteterText())
-
-        rollflaeche.documentView = textAnsicht
-        rollflaeche.hasVerticalScroller = true
-        rollflaeche.borderType = .noBorder
-        rollflaeche.wantsLayer = true
-        rollflaeche.layer?.cornerRadius = 8
 
         fusszeile.font = .systemFont(ofSize: 11)
         fusszeile.textColor = .secondaryLabelColor
@@ -64,12 +55,18 @@ final class RueckwegPopup: TastaturPanel {
         stapel.orientation = .vertical
         stapel.spacing = 10
         stapel.alignment = .leading
-        stapel.edgeInsets = NSEdgeInsets(top: 16, left: 18, bottom: 16, right: 18)
+        stapel.edgeInsets = NSEdgeInsets(top: 28, left: 18, bottom: 16, right: 18)
         contentView = stapel
 
+        for zeile in [kopfzeile, warnzeile, fusszeile] {
+            zeile.setContentHuggingPriority(.required, for: .vertical)
+        }
+        rollflaeche.setContentHuggingPriority(.defaultLow, for: .vertical)
+        rollflaeche.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+
         NSLayoutConstraint.activate([
-            rollflaeche.leadingAnchor.constraint(equalTo: stapel.leadingAnchor, constant: 18),
-            rollflaeche.trailingAnchor.constraint(equalTo: stapel.trailingAnchor, constant: -18),
+            rollflaeche.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
+            rollflaeche.heightAnchor.constraint(greaterThanOrEqualToConstant: 180),
         ])
     }
 

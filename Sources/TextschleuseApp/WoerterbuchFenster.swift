@@ -120,13 +120,20 @@ final class WoerterbuchFenster: NSWindowController {
         let stapel = NSStackView(views: [rollflaeche, knopfleiste, hinweis])
         stapel.orientation = .vertical
         stapel.spacing = 10
+        stapel.alignment = .leading
         stapel.edgeInsets = NSEdgeInsets(top: 14, left: 16, bottom: 14, right: 16)
         window?.contentView = stapel
 
         rollflaeche.translatesAutoresizingMaskIntoConstraints = false
+        knopfleiste.setContentHuggingPriority(.required, for: .vertical)
+        hinweis.setContentHuggingPriority(.required, for: .vertical)
+        rollflaeche.setContentHuggingPriority(.defaultLow, for: .vertical)
+        rollflaeche.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+
         NSLayoutConstraint.activate([
-            rollflaeche.leadingAnchor.constraint(equalTo: stapel.leadingAnchor, constant: 16),
-            rollflaeche.trailingAnchor.constraint(equalTo: stapel.trailingAnchor, constant: -16),
+            rollflaeche.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -32),
+            knopfleiste.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -32),
+            rollflaeche.heightAnchor.constraint(greaterThanOrEqualToConstant: 240),
         ])
     }
 
