@@ -1,0 +1,436 @@
+import Foundation
+import TextschleuseCore
+
+// Reihenfolge: erst die Regeln einzeln, dann die Heuristik, dann das
+// Zusammenspiel in Schleuse und Rückweg, zuletzt der Speicher.
+
+// MARK: Regeln
+
+Pruefstand.pruefe("E-Mail") {
+    let funde = Regelwerk.finde(in: Beispieltexte.bankmail)
+    let mails = funde.filter { $0.kategorie == .email }
+    Pruefstand.gleich(mails.count, 1, "genau eine Adresse in der Bankmail")
+    Pruefstand.gleich(mails.first?.text, "almut.weidenbach@beispielbank-nord.de", "Adresse vollständig")
+
+    let mitPunkt = Regelwerk.finde(in: "Schreib an a.b-c@x.co.uk.")
+        .filter { $0.kategorie == .email }
+    Pruefstand.gleich(mitPunkt.first?.text, "a.b-c@x.co.uk", "Satzpunkt gehört nicht zur Adresse")
+}
+
+Pruefstand.pruefe("IBAN") {
+    let funde = Regelwerk.finde(in: Beispieltexte.bankmail).filter { $0.kategorie == .iban }
+    Pruefstand.gleich(funde.count, 1, "IBAN mit Leerzeichen erkannt")
+    Pruefstand.gleich(funde.first?.text, "DE89 3704 0044 0532 0130 00", "IBAN samt Gruppierung")
+
+    Pruefstand.wahr(IbanRegel.pruefsummeStimmt("DE89370400440532013000"), "gültige Prüfsumme")
+    Pruefstand.falsch(IbanRegel.pruefsummeStimmt("DE89370400440532013001"), "verfälschte Ziffer fällt durch")
+    Pruefstand.falsch(IbanRegel.pruefsummeStimmt("DE00370400440532013000"), "falsche Prüfziffern fallen durch")
+
+    let unecht = Regelwerk.finde(in: "Aktenzeichen DE12 3456 7890 1234 5678 90 im Vorgang")
+        .filter { $0.kategorie == .iban }
+    Pruefstand.gleich(unecht.count, 0, "Zeichenfolge ohne gültige Prüfsumme ist keine IBAN")
+}
+
+Pruefstand.pruefe("BIC") {
+    let funde = Regelwerk.finde(in: "Bankverbindung GENODE61MA1, bitte prüfen.")
+        .filter { $0.kategorie == .bic }
+    Pruefstand.gleich(funde.count, 1, "BIC mit Filialkennung")
+
+    let falschPositiv = Regelwerk.finde(in: "Das Kürzel MARISK steht für nichts Bankfachliches.")
+        .filter { $0.kategorie == .bic }
+    Pruefstand.gleich(falschPositiv.count, 0, "gewöhnliche Großbuchstabenwörter sind kein BIC")
+}
+
+Pruefstand.pruefe("Kartennummer") {
+    let funde = Regelwerk.finde(in: Beispieltexte.aktenvermerk).filter { $0.kategorie == .karte }
+    Pruefstand.gleich(funde.count, 1, "Testkarte im Aktenvermerk erkannt")
+
+    Pruefstand.wahr(KartenRegel.luhnStimmt("4111111111111111"), "Luhn: gültige Testnummer")
+    Pruefstand.falsch(KartenRegel.luhnStimmt("4111111111111112"), "Luhn: letzte Ziffer verdreht")
+    Pruefstand.falsch(KartenRegel.luhnStimmt("1234567812345678"), "Luhn: erfundene Nummer")
+}
+
+Pruefstand.pruefe("Telefon") {
+    let mail = Regelwerk.finde(in: Beispieltexte.bankmail).filter { $0.kategorie == .telefon }
+    Pruefstand.gleich(mail.count, 1, "Nummer hinter „Tel.\" erkannt")
+
+    let vermerk = Regelwerk.finde(in: Beispieltexte.aktenvermerk).filter { $0.kategorie == .telefon }
+    Pruefstand.gleich(vermerk.count, 1, "Nummer mit Ländervorwahl erkannt")
+    Pruefstand.gleich(vermerk.first?.text, "+49 621 9876543", "Ländervorwahl gehört dazu")
+
+    for schreibweise in ["0621/123456", "0621-123456", "(0621) 123456", "+49 (0)621 123456"] {
+        let treffer = Regelwerk.finde(in: "Rückruf unter \(schreibweise) erbeten")
+            .filter { $0.kategorie == .telefon }
+        Pruefstand.gleich(treffer.count, 1, "Schreibweise \(schreibweise)")
+    }
+}
+
+Pruefstand.pruefe("Telefon: keine Falschtreffer") {
+    // Die Vorgangsnummer sieht wie eine Nummer aus, hat aber keinen
+    // Telefonkontext und keine Trennzeichen. Sie darf nicht anspringen.
+    let funde = Regelwerk.finde(in: Beispieltexte.beschwerde).filter { $0.kategorie == .telefon }
+    Pruefstand.gleich(funde.count, 0, "Vorgangsnummer 4711000815 ist keine Telefonnummer")
+
+    let betrag = Regelwerk.finde(in: "Der Saldo betrug 1.234.567,89 EUR im Jahr 2024.")
+        .filter { $0.kategorie == .telefon }
+    Pruefstand.gleich(betrag.count, 0, "Geldbetrag ist keine Telefonnummer")
+}
+
+Pruefstand.pruefe("Geburtsdatum") {
+    let vermerk = Regelwerk.finde(in: Beispieltexte.aktenvermerk).filter { $0.kategorie == .datum }
+    Pruefstand.gleich(vermerk.count, 1, "Datum hinter „geboren am\" erkannt")
+    Pruefstand.gleich(vermerk.first?.text, "04.07.1968", "nur das Datum, nicht der Kontext")
+
+    // Ein Datum ohne Geburtskontext ist Fachinhalt und bleibt stehen.
+    let mail = Regelwerk.finde(in: Beispieltexte.bankmail).filter { $0.kategorie == .datum }
+    Pruefstand.gleich(mail.count, 0, "„Ihre Nachricht vom 12.03.2024\" ist kein Geburtsdatum")
+
+    for form in ["geb. 04.07.1968", "*04.07.1968", "Geburtsdatum: 04.07.1968", "geboren 4.7.1968"] {
+        let treffer = Regelwerk.finde(in: "Kunde \(form) laut Ausweis")
+            .filter { $0.kategorie == .datum }
+        Pruefstand.gleich(treffer.count, 1, "Schreibweise \(form)")
+    }
+}
+
+Pruefstand.pruefe("Steuer-ID") {
+    let funde = Regelwerk.finde(in: Beispieltexte.aktenvermerk).filter { $0.kategorie == .steuerId }
+    Pruefstand.gleich(funde.count, 1, "elfstellige Steuer-ID mit Gruppierung erkannt")
+}
+
+// MARK: Heuristik
+
+Pruefstand.pruefe("Heuristik: Personen") {
+    let funde = Heuristik.finde(in: Beispieltexte.bankmail, woerterbuch: Woerterbuch())
+    let namen = Set(funde.filter { $0.kategorie == .person }.map(\.text))
+    Pruefstand.wahr(namen.contains("Almut Weidenbach"), "Vor- und Nachname als Paar")
+    Pruefstand.wahr(namen.contains("Ilse Bergkamp"), "Grußformel-Name erkannt")
+    Pruefstand.wahr(
+        funde.allSatisfy { $0.sicherheit == .vermutung },
+        "Heuristiktreffer sind immer Vermutungen, nie sicher"
+    )
+}
+
+Pruefstand.pruefe("Heuristik: Firmen") {
+    let funde = Heuristik.finde(in: Beispieltexte.bankmail, woerterbuch: Woerterbuch())
+    let firmen = funde.filter { $0.kategorie == .firma }.map(\.text)
+    Pruefstand.wahr(
+        firmen.contains(where: { $0.contains("Beispielbank Nord") }),
+        "Rechtsform eG zieht den Firmennamen mit"
+    )
+}
+
+Pruefstand.pruefe("Heuristik: Satzanfänge") {
+    // Jedes deutsche Substantiv ist großgeschrieben. Ohne Gegenmaßnahme
+    // würde die Heuristik den halben Text als Namen markieren.
+    let funde = Heuristik.finde(
+        in: "Die Prüfung ergab keine Beanstandung. Der Bericht liegt vor.",
+        woerterbuch: Woerterbuch()
+    )
+    Pruefstand.gleich(funde.count, 0, "gewöhnlicher Fließtext ergibt keine Namensvermutung")
+}
+
+// MARK: Varianten und Beugung
+
+Pruefstand.pruefe("Varianten: ganze Wörter") {
+    guard let regex = Varianten.regex(fuer: "Berg") else {
+        Pruefstand.wahr(false, "Regex ließ sich bauen")
+        return
+    }
+    let text = "Berg, Bergkamp und Heidelberg" as NSString
+    let treffer = regex.matches(in: text as String, range: NSRange(location: 0, length: text.length))
+    Pruefstand.gleich(treffer.count, 1, "nur das eigenständige Wort trifft")
+    Pruefstand.gleich(text.substring(with: treffer[0].range), "Berg", "Treffer ist „Berg\"")
+}
+
+Pruefstand.pruefe("Varianten: Beugung") {
+    guard let regex = Varianten.regex(fuer: "Nyström") else {
+        Pruefstand.wahr(false, "Regex ließ sich bauen")
+        return
+    }
+    for form in ["Nyström", "Nyströms", "Nyströme", "Nyströmen"] {
+        let text = "Vorgang \(form) heute" as NSString
+        let treffer = regex.numberOfMatches(
+            in: text as String,
+            range: NSRange(location: 0, length: text.length)
+        )
+        Pruefstand.gleich(treffer, 1, "gebeugte Form \(form)")
+    }
+}
+
+Pruefstand.pruefe("Varianten: Schreibweisen") {
+    guard let regex = Varianten.regex(fuer: "Müller-Lüdenscheidt") else {
+        Pruefstand.wahr(false, "Regex ließ sich bauen")
+        return
+    }
+    for form in ["Müller-Lüdenscheidt", "müller-lüdenscheidt", "MÜLLER-LÜDENSCHEIDT"] {
+        let text = "Herr \(form) rief an" as NSString
+        let treffer = regex.numberOfMatches(
+            in: text as String,
+            range: NSRange(location: 0, length: text.length)
+        )
+        Pruefstand.gleich(treffer, 1, "Groß- und Kleinschreibung: \(form)")
+    }
+}
+
+// MARK: Schleuse
+
+Pruefstand.pruefe("Schleuse: Regeltreffer werden hart ersetzt") {
+    let analyse = Schleuse.analysiere(Beispieltexte.bankmail, woerterbuch: Woerterbuch())
+    let geschuetzt = Schleuse.geschuetzterText(analyse)
+
+    Pruefstand.enthaeltNicht(geschuetzt, "almut.weidenbach@beispielbank-nord.de", "Adresse ersetzt")
+    Pruefstand.enthaeltNicht(geschuetzt, "DE89 3704 0044 0532 0130 00", "IBAN ersetzt")
+    Pruefstand.enthaeltNicht(geschuetzt, "0621 1234567", "Telefonnummer ersetzt")
+    Pruefstand.enthaelt(geschuetzt, "EMAIL_1", "Platzhalter steht im Text")
+    Pruefstand.enthaelt(geschuetzt, "vielen Dank für Ihre Nachricht", "Fachinhalt bleibt unverändert")
+}
+
+Pruefstand.pruefe("Schleuse: Vermutungen bleiben unbestätigt") {
+    let analyse = Schleuse.analysiere(Beispieltexte.bankmail, woerterbuch: Woerterbuch())
+    Pruefstand.wahr(!analyse.ungeprueft.isEmpty, "es gibt etwas zu prüfen")
+    Pruefstand.wahr(
+        analyse.ungeprueft.allSatisfy { $0.platzhalter.hasPrefix("UNBEKANNT_") },
+        "unbestätigte Vermutungen werden zu UNBEKANNT_n"
+    )
+    Pruefstand.wahr(
+        analyse.regeltreffer.allSatisfy { !$0.platzhalter.hasPrefix("UNBEKANNT_") },
+        "Regeltreffer sind nie unbekannt"
+    )
+}
+
+Pruefstand.pruefe("Schleuse: Platzhalter bleiben über Texte hinweg gleich") {
+    var buch = Woerterbuch()
+    let erste = Schleuse.analysiere(Beispieltexte.bankmail, woerterbuch: buch)
+    buch = erste.woerterbuch
+    guard let mail = erste.regeltreffer.first(where: { $0.kategorie == .email }) else {
+        Pruefstand.wahr(false, "Adresse im ersten Text gefunden")
+        return
+    }
+
+    let zweite = Schleuse.analysiere(
+        "Nachfrage an almut.weidenbach@beispielbank-nord.de wegen des Termins.",
+        woerterbuch: buch
+    )
+    // Beim zweiten Mal kommt der Treffer aus dem Wörterbuch, nicht mehr aus
+    // der Regel. Der Platzhalter muss trotzdem derselbe sein.
+    let wieder = zweite.aktiveFunde.first { $0.kategorie == .email }
+    Pruefstand.gleich(wieder?.platzhalter, mail.platzhalter, "dieselbe Adresse, derselbe Platzhalter")
+    Pruefstand.gleich(wieder?.quelle, .woerterbuch, "der Treffer kommt jetzt aus dem Wörterbuch")
+}
+
+Pruefstand.pruefe("Schleuse: bestätigte Vermutung wird gemerkt") {
+    var analyse = Schleuse.analysiere(Beispieltexte.aktenvermerk, woerterbuch: Woerterbuch())
+    guard let vermutung = analyse.ungeprueft.first(where: { $0.text == "Thorben Nyström" }) else {
+        Pruefstand.wahr(false, "„Thorben Nyström\" als Vermutung vorhanden")
+        return
+    }
+
+    Schleuse.bestaetige(fundId: vermutung.id, als: .person, in: &analyse)
+    let geschuetzt = Schleuse.geschuetzterText(analyse)
+    Pruefstand.enthaelt(geschuetzt, "PERSON_1", "bestätigter Name bekommt PERSON_1")
+    Pruefstand.enthaeltNicht(geschuetzt, "Thorben Nyström", "Klartext ist raus")
+    Pruefstand.gleich(analyse.woerterbuch.eintraege.count > 0, true, "Eintrag liegt im Wörterbuch")
+
+    // Zweiter Text, diesmal nur der Nachname. Der ist keine sichere Sache —
+    // es könnte der Bruder sein — kommt aber mit dem Hinweis, zu wem er
+    // vermutlich gehört.
+    let spaeter = Schleuse.analysiere(
+        "Herr Nyström hat zugestimmt.",
+        woerterbuch: analyse.woerterbuch
+    )
+    guard let nachname = spaeter.aktiveFunde.first(where: { $0.text == "Nyström" }) else {
+        Pruefstand.wahr(false, "der einzelne Nachname wird gefunden")
+        return
+    }
+    Pruefstand.gleich(nachname.sicherheit, .vermutung, "und bleibt eine Vermutung")
+    Pruefstand.gleich(
+        nachname.gruppenVorschlag,
+        analyse.woerterbuch.eintrag(fuerText: "Thorben Nyström")?.id,
+        "mit Verweis auf die Hauptnennung"
+    )
+
+    // Volle Nennung dagegen greift ohne Nachfrage.
+    let voll = Schleuse.analysiere(
+        "Thorben Nyström hat zugestimmt.",
+        woerterbuch: analyse.woerterbuch
+    )
+    Pruefstand.wahr(
+        voll.aktiveFunde.contains { $0.quelle == .woerterbuch && $0.platzhalter == "PERSON_1" },
+        "der gemerkte Name greift beim nächsten Mal von selbst"
+    )
+}
+
+Pruefstand.pruefe("Schleuse: Alias hängt an der Hauptnennung") {
+    var analyse = Schleuse.analysiere(Beispieltexte.beschwerde, woerterbuch: Woerterbuch())
+    guard let voll = analyse.ungeprueft.first(where: { $0.text == "Ilse Bergkamp" }) else {
+        Pruefstand.wahr(false, "„Ilse Bergkamp\" als Vermutung vorhanden")
+        return
+    }
+    Schleuse.bestaetige(fundId: voll.id, als: .person, in: &analyse)
+
+    guard let eintrag = analyse.woerterbuch.eintrag(fuerText: "Ilse Bergkamp") else {
+        Pruefstand.wahr(false, "Eintrag angelegt")
+        return
+    }
+    guard let kurz = analyse.funde.first(where: { $0.text == "Bergkamp" && $0.eintragId == nil }) else {
+        Pruefstand.wahr(false, "„Bergkamp\" separat gefunden")
+        return
+    }
+
+    Schleuse.alsAliasZuordnen(fundId: kurz.id, zu: eintrag.id, in: &analyse)
+    let geschuetzt = Schleuse.geschuetzterText(analyse)
+    Pruefstand.enthaelt(geschuetzt, "PERSON_1", "Hauptnennung")
+    Pruefstand.enthaelt(geschuetzt, "PERSON_1B", "Kurzform als Unter-Platzhalter")
+    Pruefstand.enthaeltNicht(geschuetzt, "Bergkamp", "kein Klartext mehr übrig")
+}
+
+Pruefstand.pruefe("Schleuse: verworfener Fund bleibt Klartext") {
+    var analyse = Schleuse.analysiere(Beispieltexte.bankmail, woerterbuch: Woerterbuch())
+    guard let fund = analyse.ungeprueft.first else {
+        Pruefstand.wahr(false, "Vermutung vorhanden")
+        return
+    }
+    let text = fund.text
+    Schleuse.verwerfe(fundId: fund.id, in: &analyse)
+    Pruefstand.enthaelt(Schleuse.geschuetzterText(analyse), text, "„\(text)\" steht weiterhin im Text")
+}
+
+// MARK: Hinweise
+
+Pruefstand.pruefe("Hinweise") {
+    let analyse = Schleuse.analysiere(Beispieltexte.bankmail, woerterbuch: Woerterbuch())
+    let fuerKi = Schleuse.fuerZwischenablage(analyse, mitHinweisen: true)
+    Pruefstand.enthaelt(fuerKi, "Platzhalter", "der Vorspann erklärt die Platzhalter")
+    Pruefstand.enthaelt(fuerKi, "UNBEKANNT", "der Vorspann warnt vor den Unbekannten")
+
+    let ohne = Schleuse.fuerZwischenablage(analyse, mitHinweisen: false)
+    Pruefstand.gleich(ohne, Schleuse.geschuetzterText(analyse), "ohne Hinweise nur der nackte Text")
+}
+
+// MARK: Rückweg
+
+Pruefstand.pruefe("Rückweg: Hin und zurück") {
+    var analyse = Schleuse.analysiere(Beispieltexte.bankmail, woerterbuch: Woerterbuch())
+    for fund in analyse.ungeprueft {
+        Schleuse.bestaetige(fundId: fund.id, als: fund.kategorie, in: &analyse)
+    }
+    let geschuetzt = Schleuse.geschuetzterText(analyse)
+
+    let zurueck = Rueckweg.analysiere(
+        geschuetzt,
+        woerterbuch: analyse.woerterbuch,
+        unbekannte: analyse.unbekannte
+    )
+    Pruefstand.gleich(zurueck.offen.count, 0, "nichts bleibt offen")
+    Pruefstand.gleich(zurueck.ergebnis, Beispieltexte.bankmail, "Wort für Wort derselbe Text")
+}
+
+Pruefstand.pruefe("Rückweg: Schreibvarianten der KI") {
+    var buch = Woerterbuch()
+    _ = buch.anlegen(text: "Thorben Nyström", kategorie: .person)
+
+    for variante in ["PERSON_1", "**PERSON_1**", "<PERSON_1>", "[PERSON_1]", "PERSON 1", "Person_1", "person_1"] {
+        let ergebnis = Rueckweg.analysiere(
+            "Bitte melde dich bei \(variante) wegen des Termins.",
+            woerterbuch: buch,
+            unbekannte: [:]
+        )
+        Pruefstand.gleich(ergebnis.aufgeloest.count, 1, "Variante \(variante) erkannt")
+        Pruefstand.enthaelt(ergebnis.ergebnis, "Thorben Nyström", "Variante \(variante) aufgelöst")
+    }
+}
+
+Pruefstand.pruefe("Rückweg: Alias getrennt vom Hauptnamen") {
+    var buch = Woerterbuch()
+    let eintrag = buch.anlegen(text: "Ilse Bergkamp", kategorie: .person)
+    guard let alias = buch.aliasHinzufuegen("Bergkamp", zu: eintrag.id) else {
+        Pruefstand.wahr(false, "Alias ließ sich anlegen")
+        return
+    }
+    let aliasPlatzhalter = buch.eintrag(mitId: eintrag.id)?.platzhalter(fuer: alias) ?? ""
+
+    let ergebnis = Rueckweg.analysiere(
+        "Frau PERSON_1 hat unterschrieben, \(aliasPlatzhalter) bestätigt den Eingang.",
+        woerterbuch: buch,
+        unbekannte: [:]
+    )
+    Pruefstand.enthaelt(ergebnis.ergebnis, "Frau Ilse Bergkamp", "Hauptnennung")
+    Pruefstand.enthaelt(ergebnis.ergebnis, "Bergkamp bestätigt", "Kurzform bleibt Kurzform")
+}
+
+Pruefstand.pruefe("Rückweg: Unbekanntes bleibt stehen") {
+    let ergebnis = Rueckweg.analysiere(
+        "Bitte an UNBEKANNT_3 weiterleiten.",
+        woerterbuch: Woerterbuch(),
+        unbekannte: [:]
+    )
+    Pruefstand.gleich(ergebnis.offen.count, 1, "der Platzhalter wird als offen gemeldet")
+    Pruefstand.enthaelt(ergebnis.ergebnis, "UNBEKANNT_3", "und bleibt im Text stehen")
+}
+
+// MARK: Speicher
+
+Pruefstand.pruefe("Speicher: verschlüsselt sichern und laden") {
+    let ordner = FileManager.default.temporaryDirectory
+        .appendingPathComponent("textschleuse-pruefung-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: ordner) }
+
+    // Fester Schlüssel statt Keychain: ein unsigniertes Programm bekommt vom
+    // Anmeldeschlüsselbund keinen Zugriff. Der Keychain-Weg wird in der
+    // gebauten App geprüft, nicht hier.
+    let quelle = FesterSchluessel()
+    let speicher = Speicher(ordner: ordner, schluesselquelle: quelle)
+    var buch = Woerterbuch()
+    let eintrag = buch.anlegen(text: "Thorben Nyström", kategorie: .person)
+    _ = buch.aliasHinzufuegen("Nyström", zu: eintrag.id)
+
+    do {
+        try speicher.sichern(buch)
+        let roh = try Data(contentsOf: speicher.datei)
+        let alsText = String(decoding: roh, as: UTF8.self)
+        Pruefstand.enthaeltNicht(alsText, "Nyström", "der Name steht nicht lesbar in der Datei")
+
+        // Zweite Instanz, gleicher Schlüssel: so läuft es nach einem Neustart.
+        let geladen = try Speicher(ordner: ordner, schluesselquelle: quelle).laden()
+        Pruefstand.gleich(geladen.eintraege.count, 1, "Eintrag wieder da")
+        Pruefstand.gleich(geladen.eintraege.first?.text, "Thorben Nyström", "Text unverändert")
+        Pruefstand.gleich(geladen.eintraege.first?.aliase.count, 1, "Alias unverändert")
+    } catch {
+        Pruefstand.wahr(false, "sichern und laden ohne Fehler (\(error))")
+    }
+}
+
+Pruefstand.pruefe("Speicher: Klartext-Export und -Import") {
+    let ordner = FileManager.default.temporaryDirectory
+        .appendingPathComponent("textschleuse-pruefung-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: ordner) }
+    try? FileManager.default.createDirectory(at: ordner, withIntermediateDirectories: true)
+
+    let speicher = Speicher(ordner: ordner, schluesselquelle: FesterSchluessel())
+    var buch = Woerterbuch()
+    _ = buch.anlegen(text: "Beispielbank Nord eG", kategorie: .firma)
+    let ziel = ordner.appendingPathComponent("export.json")
+
+    do {
+        try speicher.exportiereKlartext(buch, nach: ziel)
+        let alsText = try String(contentsOf: ziel, encoding: .utf8)
+        Pruefstand.enthaelt(alsText, "Beispielbank Nord eG", "der Export ist absichtlich lesbar")
+
+        let zurueck = try speicher.importiereKlartext(von: ziel)
+        Pruefstand.gleich(zurueck.eintraege.count, 1, "Import bringt den Eintrag zurück")
+    } catch {
+        Pruefstand.wahr(false, "Export und Import ohne Fehler (\(error))")
+    }
+}
+
+Pruefstand.pruefe("Wörterbuch: gelöschte Nummern werden nicht neu vergeben") {
+    var buch = Woerterbuch()
+    let erster = buch.anlegen(text: "Anna Beispiel", kategorie: .person)
+    Pruefstand.gleich(erster.platzhalter, "PERSON_1", "erste Person")
+
+    buch.loeschen(erster.id)
+    let zweiter = buch.anlegen(text: "Bernd Beispiel", kategorie: .person)
+    Pruefstand.gleich(zweiter.platzhalter, "PERSON_2", "die 1 bleibt verbrannt")
+}
+
+Pruefstand.bilanzUndEnde()
