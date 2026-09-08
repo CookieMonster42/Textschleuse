@@ -217,12 +217,15 @@ final class Steuerung: NSObject, NSApplicationDelegate {
         // die Befehle an die Menüeinträge, nicht an die Textfelder.
         let bearbeiten = NSMenuItem()
         let bearbeitenMenue = NSMenu(title: "Bearbeiten")
-        for (titel, aktion, taste) in [
-            ("Widerrufen", Selector(("undo:")), "z"),
-            ("Wiederholen", Selector(("redo:")), "Z"),
-        ] {
-            bearbeitenMenue.addItem(withTitle: titel, action: aktion, keyEquivalent: taste)
-        }
+        // Ohne Ziel: der Befehl wandert die Antwortkette hinunter bis zu dem,
+        // der ihn versteht. In der Schutzansicht ist das ihr eigener Verlauf.
+        bearbeitenMenue.addItem(withTitle: "Widerrufen", action: Selector(("undo:")), keyEquivalent: "z")
+        let wiederholen = bearbeitenMenue.addItem(
+            withTitle: "Wiederholen",
+            action: Selector(("redo:")),
+            keyEquivalent: "z"
+        )
+        wiederholen.keyEquivalentModifierMask = [.command, .shift]
         bearbeitenMenue.addItem(.separator())
         for (titel, aktion, taste) in [
             ("Ausschneiden", #selector(NSText.cut(_:)), "x"),

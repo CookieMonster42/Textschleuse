@@ -38,6 +38,14 @@ final class SchutzAnsicht: NSView {
     /// Sammelt Tastenanschläge, damit nicht bei jedem Buchstaben der ganze
     /// Text neu durchsucht wird.
     private var nachdenkpause: Timer?
+
+    /// Der Widerruf arbeitet auf der ganzen Analyse, nicht auf dem Textfeld.
+    ///
+    /// Der eingebaute Widerruf einer `NSTextView` kann hier nicht greifen:
+    /// jede Neuprüfung ersetzt den kompletten Textspeicher, danach zeigt sein
+    /// Verlauf auf Text, den es nicht mehr gibt. Ein Stand ist deshalb immer
+    /// alles zusammen — Text, Fundstellen und Wörterbuch.
+    private let verlauf = UndoManager()
     private var mitte = NSStackView()
 
     private let knopfleiste = NSStackView()
@@ -61,6 +69,9 @@ final class SchutzAnsicht: NSView {
 
     /// Wirft den bisherigen Text weg und fängt mit einem neuen an.
     func setze(analyse neue: Analyse) {
+        // Ein neuer Text fängt einen neuen Verlauf an; alles davor gehört zu
+        // einem Text, den es nicht mehr gibt.
+        verlauf.removeAllActions()
         analyse = neue
         auswahl = 0
 
@@ -136,7 +147,8 @@ final class SchutzAnsicht: NSView {
         // geschoben. Nur so kann man tippen, ohne die Zuordnung zu zerreißen.
         textAnsicht.isEditable = true
         textAnsicht.isRichText = false
-        textAnsicht.allowsUndo = true
+        // Aus: sonst kämen sich zwei Verläufe in die Quere.
+        textAnsicht.allowsUndo = false
         textAnsicht.font = .systemFont(ofSize: 13)
 
         mitte = NSStackView(views: [rollflaeche, liste])
@@ -514,6 +526,7 @@ final class SchutzAnsicht: NSView {
     /// sonst die ausgewählte Fundstelle.
     private func setzeKategorie(_ kategorie: Kategorie) {
         zeigeMeldung(nil)
+        merkeStand("Kategorie zuweisen")
 
         let vorher = analyse.aktiveFunde.count
 
@@ -595,6 +608,7 @@ final class SchutzAnsicht: NSView {
             vorschlag: aktuellerFund?.gruppenVorschlag
         ) else { return }
 
+        merkeStand("Zuordnen")
         let vorher = analyse.aktiveFunde.count
         if let bereich {
             guard let neue = Schleuse.markiereAlsSchreibweise(
@@ -623,8 +637,39 @@ final class SchutzAnsicht: NSView {
 
     private func verwerfeAktuellen() {
         guard let fund = aktuellerFund else { return }
+        merkeStand("Verwerfen")
         Schleuse.verwerfe(fundId: fund.id, in: &analyse)
         aktualisiere()
+    }
+
+    // MARK: Widerrufen
+
+    override var undoManager: UndoManager? { verlauf }
+
+    func undoManager(for ansicht: NSTextView) -> UndoManager? { verlauf }
+
+    @objc func undo(_ absender: Any?) { verlauf.undo() }
+
+    @objc func redo(_ absender: Any?) { verlauf.redo() }
+
+    /// Legt den jetzigen Stand auf den Stapel. Vor jeder Änderung aufrufen.
+    private func merkeStand(_ name: String) {
+        let stand = analyse
+        let marke = originalMarke()
+        verlauf.registerUndo(withTarget: self) { ziel in
+            // Beim Widerrufen denselben Weg rückwärts eintragen, damit ⇧⌘Z
+            // wieder vorwärts geht.
+            ziel.merkeStand(name)
+            ziel.setzeStand(stand, marke: marke)
+        }
+        verlauf.setActionName(name)
+    }
+
+    private func setzeStand(_ stand: Analyse, marke: Int) {
+        analyse = stand
+        auswahl = 0
+        zeigeMeldung(nil)
+        aktualisiere(originalMarke: marke)
     }
 
     // MARK: Für den Selbsttest
@@ -635,6 +680,9 @@ final class SchutzAnsicht: NSView {
         pruefeJetzt()
     }
     func istInVorschauFuerPruefung() -> Bool { ohneChips }
+    func widerrufeFuerPruefung() { verlauf.undo() }
+    func wiederholeFuerPruefung() { verlauf.redo() }
+    func kannWiderrufenFuerPruefung() -> Bool { verlauf.canUndo }
     func darfAendernFuerPruefung(_ bereich: NSRange) -> Bool {
         textView(textAnsicht, shouldChangeTextIn: bereich, replacementString: "x")
     }
@@ -701,6 +749,7 @@ final class SchutzAnsicht: NSView {
     /// Wirft den Text weg und lässt dich gleich tippen. Ohne das müsste man
     /// erst irgendwas anderes kopieren, um den alten Text loszuwerden.
     @objc private func leeren() {
+        merkeStand("Leeren")
         analyse = Schleuse.analysiere("", woerterbuch: analyse.woerterbuch)
         auswahl = 0
         aktualisiere()
@@ -725,6 +774,9 @@ final class SchutzAnsicht: NSView {
         guard getippt != analyse.original else { return }
 
         let marke = originalMarke()
+        // Ein Stand je Tipppause, nicht je Anschlag. ⌘Z nimmt damit den
+        // ganzen zusammenhängenden Schwung zurück.
+        merkeStand("Tippen")
         analyse = Schleuse.analysiere(getippt, woerterbuch: analyse.woerterbuch)
         auswahl = 0
         aktualisiere(originalMarke: marke)
@@ -742,6 +794,7 @@ final class SchutzAnsicht: NSView {
             return
         }
 
+        merkeStand("Neuer Text")
         analyse = Schleuse.analysiere(text, woerterbuch: analyse.woerterbuch)
         auswahl = 0
         textAnsicht.setSelectedRange(NSRange(location: 0, length: 0))
@@ -760,6 +813,7 @@ final class SchutzAnsicht: NSView {
             return
         }
 
+        merkeStand("Original ändern")
         do {
             try Schleuse.ersetzeOriginaltext(fundId: fund.id, durch: eingabe, in: &analyse)
             zeigeMeldung(nil)
@@ -779,6 +833,7 @@ final class SchutzAnsicht: NSView {
         let eingabe = decknameFeld.stringValue
 
         if eingabe.uppercased() != fund.platzhalter.uppercased() {
+            merkeStand("Deckname ändern")
             do {
                 try Schleuse.benenneUm(fundId: fund.id, auf: eingabe, in: &analyse)
                 zeigeMeldung(nil)

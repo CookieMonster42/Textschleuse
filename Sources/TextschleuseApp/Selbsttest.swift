@@ -33,6 +33,7 @@ enum Selbsttest {
         fehler += pruefeSprungZurFundstelle()
         fehler += pruefeZiffernBeiMarkierung()
         fehler += pruefeInlineDecknamen()
+        fehler += pruefeWiderruf()
 
         print("")
         print(fehler == 0 ? "Alles in Ordnung." : "\(fehler) Punkt(e) fehlgeschlagen.")
@@ -837,6 +838,65 @@ enum Selbsttest {
             print("✓ Inline: getippter Text kommt sauber im Original an")
         } else {
             print("✗ Inline: im Original steht „\(ansicht.analyse.original)\"")
+            fehler += 1
+        }
+        return fehler
+    }
+
+    /// ⌘Z und ⇧⌘Z: nimmt der Widerruf ganze Stände zurück und wieder vor?
+    private static func pruefeWiderruf() -> Int {
+        var fehler = 0
+        let text = "Das Projekt Nordlicht startet bald."
+        let ansicht = SchutzAnsicht(analyse: Schleuse.analysiere(text, woerterbuch: Woerterbuch()))
+        let fenster = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1000, height: 640),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        fenster.contentView = ansicht
+        fenster.layoutIfNeeded()
+        defer { fenster.orderOut(nil) }
+
+        if !ansicht.kannWiderrufenFuerPruefung() {
+            print("✓ Widerruf: am Anfang gibt es nichts zurückzunehmen")
+        } else {
+            print("✗ Widerruf: der Stapel ist schon vor der ersten Änderung voll")
+            fehler += 1
+        }
+
+        // Eine Kategorie zuweisen …
+        ansicht.markiereFuerPruefung((text as NSString).range(of: "Nordlicht"))
+        _ = ansicht.tasteFuerPruefung("1")
+        let nachZuweisung = ansicht.analyse.woerterbuch.eintraege.count
+
+        // … und zurücknehmen.
+        ansicht.widerrufeFuerPruefung()
+        let nachWiderruf = ansicht.analyse.woerterbuch.eintraege.count
+        if nachZuweisung == 1, nachWiderruf == 0 {
+            print("✓ Widerruf: ⌘Z nimmt die Zuweisung samt Wörterbucheintrag zurück")
+        } else {
+            print("✗ Widerruf: \(nachZuweisung) Einträge vorher, \(nachWiderruf) nachher")
+            fehler += 1
+        }
+
+        // Und wieder vor.
+        ansicht.wiederholeFuerPruefung()
+        if ansicht.analyse.woerterbuch.eintraege.count == 1 {
+            print("✓ Widerruf: ⇧⌘Z stellt sie wieder her")
+        } else {
+            print("✗ Widerruf: das Wiederholen bringt nichts zurück")
+            fehler += 1
+        }
+
+        // Auch getippter Text muss zurückgehen.
+        let vorherText = ansicht.analyse.original
+        ansicht.setzeTextFuerPruefung("Ganz anderer Text ohne alles.")
+        ansicht.widerrufeFuerPruefung()
+        if ansicht.analyse.original == vorherText {
+            print("✓ Widerruf: auch getippter Text geht zurück")
+        } else {
+            print("✗ Widerruf: nach dem Zurücknehmen steht „\(ansicht.analyse.original)\"")
             fehler += 1
         }
         return fehler
