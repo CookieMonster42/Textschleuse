@@ -179,7 +179,40 @@ final class SchutzPopup: TastaturPanel {
         bereiche = aufbau.bereiche
         textAnsicht.textStorage?.setAttributedString(aufbau.text)
 
+        beschrifteKopf()
+
+        liste.zeige(
+            analyse.funde.sorted { $0.bereich.location < $1.bereich.location }.map(listenzeile),
+            ausgewaehlt: gewaehlt,
+            leertext: analyse.original.isEmpty
+                ? "Kein Text zum Prüfen."
+                : "Nichts erkannt.\n\nMarkiere links im Text, was geschützt werden soll, und drücke 1–5."
+        )
+
+        if let gewaehlt, let bereich = bereiche[gewaehlt] {
+            textAnsicht.scrollRangeToVisible(bereich)
+        }
+        aktualisiereWerkzeuge()
+    }
+
+    /// Die beiden Zeilen über dem Text. Sie müssen auch dann etwas sagen, wenn
+    /// nichts gefunden wurde — sonst steht ein leeres Fenster da und du weißt
+    /// nicht, ob die App überhaupt gelaufen ist.
+    private func beschrifteKopf() {
+        guard !analyse.original.isEmpty else {
+            kopfzeile.stringValue = "In der Zwischenablage steht kein Text"
+            regelzeile.stringValue = "Kopiere etwas und drücke ⌘N, dann liest die Textschleuse neu ein."
+            return
+        }
+
         let gesamt = analyse.aktiveFunde.count
+        guard gesamt > 0 else {
+            kopfzeile.stringValue = "Nichts gefunden"
+            regelzeile.stringValue = "Der Text ginge unverändert raus. Markiere im Text, was geschützt "
+                + "werden soll, und drücke 1–5. Mit ⏎ kopierst du ihn so, wie er ist."
+            return
+        }
+
         let offen = analyse.ungeprueft.count
         kopfzeile.stringValue = offen == 0
             ? "\(gesamt) Fundstellen, alle geprüft"
@@ -193,14 +226,6 @@ final class SchutzPopup: TastaturPanel {
         if !zusammenfassung.isEmpty { teile.append("Ohne Nachfrage ersetzt: \(zusammenfassung)") }
         teile.append(gemerkt == 1 ? "1 Eintrag im Wörterbuch" : "\(gemerkt) Einträge im Wörterbuch")
         regelzeile.stringValue = teile.joined(separator: " · ") + "."
-
-        liste.zeige(analyse.funde.sorted { $0.bereich.location < $1.bereich.location }.map(listenzeile),
-                    ausgewaehlt: gewaehlt)
-
-        if let gewaehlt, let bereich = bereiche[gewaehlt] {
-            textAnsicht.scrollRangeToVisible(bereich)
-        }
-        aktualisiereWerkzeuge()
     }
 
     private func listenzeile(_ fund: Fund) -> Fundstellenliste.Zeile {
@@ -496,6 +521,8 @@ extension SchutzPopup: NSTextViewDelegate {
             kopfzeile.stringValue = merkenHaken.state == .on
                 ? "Markierung: Taste 1–5 legt sie als neuen Eintrag an"
                 : "Markierung: Taste 1–5 schützt sie nur in diesem Text"
+        } else {
+            beschrifteKopf()
         }
     }
 }

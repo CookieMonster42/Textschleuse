@@ -133,16 +133,12 @@ final class Steuerung: NSObject, NSApplicationDelegate {
         // Ein noch offenes Popup wird geschlossen, nicht nach vorn geholt.
         // Der Kurzbefehl heißt: nimm, was jetzt in der Zwischenablage liegt.
         schliesseOffenes()
-        guard let text = Zwischenablage.lies() else {
-            KurzInfo.zeige("In der Zwischenablage steht kein Text.")
-            return
-        }
 
-        let analyse = Schleuse.analysiere(text, woerterbuch: woerterbuch)
-        guard !analyse.funde.isEmpty else {
-            KurzInfo.zeige("Nichts gefunden. Der Text bleibt, wie er ist.")
-            return
-        }
+        // Das Popup geht immer auf, auch wenn nichts gefunden wurde und auch
+        // bei leerer Zwischenablage. Ein Fenster, das sich von selbst wieder
+        // schließt, lässt dich im Ungewissen, ob der Kurzbefehl überhaupt
+        // angekommen ist — und nimmt dir die Möglichkeit, selbst zu markieren.
+        let analyse = Schleuse.analysiere(Zwischenablage.lies() ?? "", woerterbuch: woerterbuch)
 
         let popup = SchutzPopup(analyse: analyse) { [weak self] ausgang in
             self?.offenesPopup = nil
@@ -186,22 +182,17 @@ final class Steuerung: NSObject, NSApplicationDelegate {
 
     @objc private func dreheZurueck() {
         schliesseOffenes()
-        guard let text = Zwischenablage.lies() else {
-            KurzInfo.zeige("In der Zwischenablage steht kein Text.")
-            return
-        }
-
         let ergebnis = Rueckweg.analysiere(
-            text,
+            Zwischenablage.lies() ?? "",
             woerterbuch: woerterbuch,
             unbekannte: letzteUnbekannte
         )
-        guard !ergebnis.funde.isEmpty else {
-            KurzInfo.zeige("Keine Platzhalter im Text gefunden.")
-            return
-        }
 
-        let popup = RueckwegPopup(ergebnis: ergebnis) { [weak self] ausgang in
+        let popup = RueckwegPopup(
+            ergebnis: ergebnis,
+            woerterbuch: woerterbuch,
+            unbekannte: letzteUnbekannte
+        ) { [weak self] ausgang in
             self?.offenesPopup = nil
             guard case .uebernommen(let fertig) = ausgang else { return }
             Zwischenablage.schreib(fertig)

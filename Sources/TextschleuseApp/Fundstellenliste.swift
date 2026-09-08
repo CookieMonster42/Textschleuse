@@ -23,6 +23,7 @@ final class Fundstellenliste: NSView {
     private let tabelle = NSTableView()
     private let rollflaeche = NSScrollView()
     private let ueberschrift = NSTextField(labelWithString: "Fundstellen")
+    private let leerhinweis = NSTextField(wrappingLabelWithString: "")
     private var zeilen: [Zeile] = []
     /// Verhindert, dass ein programmgesteuertes Auswählen zurückmeldet und
     /// eine Schleife auslöst.
@@ -64,9 +65,15 @@ final class Fundstellenliste: NSView {
         rollflaeche.layer?.cornerRadius = 8
         rollflaeche.translatesAutoresizingMaskIntoConstraints = false
 
+        leerhinweis.font = .systemFont(ofSize: 11)
+        leerhinweis.textColor = .tertiaryLabelColor
+        leerhinweis.alignment = .center
+        leerhinweis.translatesAutoresizingMaskIntoConstraints = false
+
         ueberschrift.translatesAutoresizingMaskIntoConstraints = false
         addSubview(ueberschrift)
         addSubview(rollflaeche)
+        addSubview(leerhinweis)
 
         NSLayoutConstraint.activate([
             ueberschrift.topAnchor.constraint(equalTo: topAnchor),
@@ -75,14 +82,19 @@ final class Fundstellenliste: NSView {
             rollflaeche.leadingAnchor.constraint(equalTo: leadingAnchor),
             rollflaeche.trailingAnchor.constraint(equalTo: trailingAnchor),
             rollflaeche.bottomAnchor.constraint(equalTo: bottomAnchor),
+            leerhinweis.centerYAnchor.constraint(equalTo: rollflaeche.centerYAnchor),
+            leerhinweis.leadingAnchor.constraint(equalTo: rollflaeche.leadingAnchor, constant: 16),
+            leerhinweis.trailingAnchor.constraint(equalTo: rollflaeche.trailingAnchor, constant: -16),
         ])
     }
 
-    func zeige(_ neue: [Zeile], ausgewaehlt: UUID?) {
+    func zeige(_ neue: [Zeile], ausgewaehlt: UUID?, leertext: String) {
         zeilen = neue
         ueberschrift.stringValue = neue.isEmpty
             ? "Fundstellen"
             : "Fundstellen (\(neue.count))"
+        leerhinweis.stringValue = leertext
+        leerhinweis.isHidden = !neue.isEmpty
         tabelle.reloadData()
 
         stelltGeradeEin = true
