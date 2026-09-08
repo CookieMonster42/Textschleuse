@@ -29,6 +29,7 @@ final class Einstellungen {
         static let hinweiseMitkopieren = "clipboard.hinweise"
         static let backupErledigt = "backup.aufgefordert"
         static let backupPfad = "backup.pfad"
+        static let nurMenueleiste = "darstellung.nurMenueleiste"
     }
 
     private init() {}
@@ -63,6 +64,13 @@ final class Einstellungen {
     var backupAufgefordert: Bool {
         get { speicher.bool(forKey: Schluessel.backupErledigt) }
         set { speicher.set(newValue, forKey: Schluessel.backupErledigt) }
+    }
+
+    /// Aus heißt: Dock-Symbol und Menü oben. An heißt: nur das Symbol in der
+    /// Menüleiste, so wie am Anfang.
+    var nurMenueleiste: Bool {
+        get { speicher.bool(forKey: Schluessel.nurMenueleiste) }
+        set { speicher.set(newValue, forKey: Schluessel.nurMenueleiste) }
     }
 
     var backupPfad: URL? {
