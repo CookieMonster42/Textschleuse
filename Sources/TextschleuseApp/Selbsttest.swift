@@ -29,6 +29,7 @@ enum Selbsttest {
         fehler += pruefeMarkierenImPopup()
         fehler += pruefeWoerterbuchfenster()
         fehler += pruefeHauptfenster()
+        fehler += pruefeBearbeiten()
 
         print("")
         print(fehler == 0 ? "Alles in Ordnung." : "\(fehler) Punkt(e) fehlgeschlagen.")
@@ -582,6 +583,67 @@ enum Selbsttest {
         }
 
         _ = buch
+        return fehler
+    }
+
+    /// Bearbeiten und Leeren: kommt man an den Originaltext heran, und wird
+    /// danach richtig neu geprüft?
+    private static func pruefeBearbeiten() -> Int {
+        var fehler = 0
+        let ansicht = SchutzAnsicht(
+            analyse: Schleuse.analysiere("Herr Nyström rief an.", woerterbuch: Woerterbuch())
+        )
+        let fenster = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1000, height: 640),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        fenster.contentView = ansicht
+        fenster.layoutIfNeeded()
+        defer { fenster.orderOut(nil) }
+
+        let vorher = ansicht.analyse.funde.count
+
+        // In den Bearbeitungsmodus, Text ändern, zurück.
+        ansicht.bearbeitenUmschaltenFuerPruefung()
+        ansicht.setzeBearbeitungstextFuerPruefung("Frau Weidenbach rief an, Nummer 0621 1234567.")
+        ansicht.bearbeitenUmschaltenFuerPruefung()
+
+        if ansicht.analyse.original.contains("Weidenbach") {
+            print("✓ Bearbeiten: der geänderte Text ist übernommen")
+        } else {
+            print("✗ Bearbeiten: der Text wurde nicht übernommen")
+            fehler += 1
+        }
+        if ansicht.analyse.funde.contains(where: { $0.kategorie == .telefon }) {
+            print("✓ Bearbeiten: nach dem Ändern wird neu geprüft (\(vorher) → "
+                + "\(ansicht.analyse.funde.count) Fundstellen)")
+        } else {
+            print("✗ Bearbeiten: es wurde nicht neu geprüft")
+            fehler += 1
+        }
+
+        // Leeren.
+        ansicht.leerenFuerPruefung()
+        if ansicht.analyse.original.isEmpty, ansicht.analyse.funde.isEmpty {
+            print("✓ Leeren: Text und Fundstellen sind weg")
+        } else {
+            print("✗ Leeren: es steht noch etwas da")
+            fehler += 1
+        }
+
+        // Und das Wörterbuch überlebt beides.
+        var buch = Woerterbuch()
+        _ = buch.anlegen(text: "Thorben Nyström", kategorie: .person)
+        let zweite = SchutzAnsicht(analyse: Schleuse.analysiere("Thorben Nyström.", woerterbuch: buch))
+        zweite.leerenFuerPruefung()
+        if zweite.analyse.woerterbuch.eintraege.count == 1 {
+            print("✓ Leeren: das Wörterbuch bleibt")
+        } else {
+            print("✗ Leeren: das Wörterbuch wurde mit weggeworfen")
+            fehler += 1
+        }
         return fehler
     }
 
