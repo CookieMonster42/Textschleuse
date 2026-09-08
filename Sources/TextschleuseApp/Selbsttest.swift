@@ -606,10 +606,8 @@ enum Selbsttest {
 
         let vorher = ansicht.analyse.funde.count
 
-        // In den Bearbeitungsmodus, Text ändern, zurück.
-        ansicht.bearbeitenUmschaltenFuerPruefung()
-        ansicht.setzeBearbeitungstextFuerPruefung("Frau Weidenbach rief an, Nummer 0621 1234567.")
-        ansicht.bearbeitenUmschaltenFuerPruefung()
+        // Direkt im Text tippen.
+        ansicht.setzeTextFuerPruefung("Frau Weidenbach rief an, Nummer 0621 1234567.")
 
         if ansicht.analyse.original.contains("Weidenbach") {
             print("✓ Bearbeiten: der geänderte Text ist übernommen")
@@ -622,6 +620,17 @@ enum Selbsttest {
                 + "\(ansicht.analyse.funde.count) Fundstellen)")
         } else {
             print("✗ Bearbeiten: es wurde nicht neu geprüft")
+            fehler += 1
+        }
+
+        // Vorschau und zurück.
+        ansicht.vorschauUmschaltenFuerPruefung()
+        let inVorschau = ansicht.istInVorschauFuerPruefung()
+        ansicht.vorschauUmschaltenFuerPruefung()
+        if inVorschau, !ansicht.istInVorschauFuerPruefung() {
+            print("✓ Vorschau: lässt sich ein- und ausschalten")
+        } else {
+            print("✗ Vorschau: das Umschalten klemmt")
             fehler += 1
         }
 

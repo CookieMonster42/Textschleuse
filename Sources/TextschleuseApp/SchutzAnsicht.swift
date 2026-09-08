@@ -31,15 +31,18 @@ final class SchutzAnsicht: NSView {
     private let liste = Fundstellenliste()
     private lazy var suche = Textsuche(ziel: textAnsicht)
 
-    /// Der Originaltext zum Tippen. Der Chiptext daneben lässt sich nicht
-    /// bearbeiten: darin stehen Platzhalter, die im Original nicht vorkommen,
-    /// und jede Eingabe würde die Zuordnung zerreißen.
-    private let bearbeitung = Textflaeche.bauen()
-    private var imBearbeitungsmodus = false
-    private var bearbeitenKnopf = NSButton()
+    /// Zeigt statt des Originaltexts, was tatsächlich rausgeht — mit
+    /// eingesetzten Platzhaltern. Nur zum Ansehen.
+    private var inVorschau = false
+    private var vorschauKnopf = NSButton()
+    /// Sammelt Tastenanschläge, damit nicht bei jedem Buchstaben der ganze
+    /// Text neu durchsucht wird.
+    private var nachdenkpause: Timer?
     private var mitte = NSStackView()
 
     private let knopfleiste = NSStackView()
+    private let originalFeld = NSTextField()
+    private let originalEtikett = NSTextField(labelWithString: "Original")
     private let decknameFeld = NSTextField()
     private let decknameEtikett = NSTextField(labelWithString: "Deckname")
     private let merkenHaken = NSButton(checkboxWithTitle: "dauerhaft merken", target: nil, action: nil)
@@ -60,8 +63,8 @@ final class SchutzAnsicht: NSView {
     func setze(analyse neue: Analyse) {
         analyse = neue
         auswahl = 0
-        imBearbeitungsmodus = false
-        zeigeModus()
+        inVorschau = false
+        textAnsicht.isEditable = true
         textAnsicht.setSelectedRange(NSRange(location: 0, length: 0))
         zeigeMeldung(nil)
         aktualisiere()
@@ -80,11 +83,6 @@ final class SchutzAnsicht: NSView {
         textAnsicht.tastenweiche = { [weak self] ereignis in
             self?.verarbeite(ereignis) ?? false
         }
-        // Auch beim Tippen am Original muss ⌘E ankommen, sonst käme man aus
-        // dem Bearbeitungsmodus nur noch mit der Maus heraus.
-        bearbeitung.text.tastenweiche = { [weak self] ereignis in
-            self?.verarbeite(ereignis) ?? false
-        }
 
         liste.translatesAutoresizingMaskIntoConstraints = false
         liste.beiAuswahl = { [weak self] kennung in
@@ -100,6 +98,15 @@ final class SchutzAnsicht: NSView {
         knopfleiste.orientation = .horizontal
         knopfleiste.spacing = 6
         baueKnoepfe()
+
+        originalEtikett.font = .systemFont(ofSize: 11)
+        originalEtikett.textColor = .secondaryLabelColor
+        originalFeld.font = .systemFont(ofSize: 12)
+        originalFeld.placeholderString = "so steht es im Text"
+        originalFeld.target = self
+        originalFeld.action = #selector(originalUebernehmen)
+        originalFeld.delegate = self
+        originalFeld.toolTip = "Korrigiert, was an dieser Stelle im Text steht. ⏎ übernimmt, ⎋ verwirft."
 
         decknameEtikett.font = .systemFont(ofSize: 11)
         decknameEtikett.textColor = .secondaryLabelColor
@@ -125,21 +132,23 @@ final class SchutzAnsicht: NSView {
             + "⌘⏎ Kopieren und alles merken · ↑ ↓ Fundstelle · ⌫ Verwerfen · G Zur Gruppe · "
             + "⌘E Text bearbeiten · ⌘F Suchen · ⌘N Neuer Text · ⎋ Abbrechen"
 
-        bearbeitung.text.isEditable = true
-        bearbeitung.text.font = .systemFont(ofSize: 13)
-        bearbeitung.text.isRichText = false
-        bearbeitung.text.allowsUndo = true
-        bearbeitung.rolle.isHidden = true
+        // Der Text ist direkt bearbeitbar. Was dasteht, ist der Originaltext;
+        // die Fundstellen sind nur eingefärbt, es wird nichts dazwischen
+        // geschoben. Nur so kann man tippen, ohne die Zuordnung zu zerreißen.
+        textAnsicht.isEditable = true
+        textAnsicht.isRichText = false
+        textAnsicht.allowsUndo = true
+        textAnsicht.font = .systemFont(ofSize: 13)
 
-        // Text und Liste nebeneinander, die Bearbeitungsfläche liegt an der
-        // Stelle des Chiptexts und ist normalerweise ausgeblendet.
-        mitte = NSStackView(views: [rollflaeche, bearbeitung.rolle, liste])
+        mitte = NSStackView(views: [rollflaeche, liste])
         mitte.orientation = .horizontal
         mitte.spacing = 12
         mitte.distribution = .fill
         mitte.translatesAutoresizingMaskIntoConstraints = false
 
-        let decknameZeile = NSStackView(views: [decknameEtikett, decknameFeld, merkenHaken, meldung])
+        let decknameZeile = NSStackView(views: [
+            originalEtikett, originalFeld, decknameEtikett, decknameFeld, merkenHaken, meldung,
+        ])
         decknameZeile.orientation = .horizontal
         decknameZeile.spacing = 8
         decknameZeile.translatesAutoresizingMaskIntoConstraints = false
@@ -170,15 +179,16 @@ final class SchutzAnsicht: NSView {
         mitte.setContentHuggingPriority(.defaultLow, for: .vertical)
         mitte.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         decknameFeld.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        originalFeld.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
         NSLayoutConstraint.activate([
             mitte.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
             mitte.heightAnchor.constraint(greaterThanOrEqualToConstant: 260),
             liste.widthAnchor.constraint(equalToConstant: 260),
-            bearbeitung.rolle.widthAnchor.constraint(equalTo: rollflaeche.widthAnchor),
             decknameZeile.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
             suche.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
-            decknameFeld.widthAnchor.constraint(greaterThanOrEqualToConstant: 180),
+            decknameFeld.widthAnchor.constraint(greaterThanOrEqualToConstant: 150),
+            originalFeld.widthAnchor.constraint(greaterThanOrEqualToConstant: 170),
         ])
     }
 
@@ -186,28 +196,36 @@ final class SchutzAnsicht: NSView {
         knopfleiste.setViews([], in: .leading)
         for (index, kategorie) in Kategorie.schnellwahl.enumerated() {
             let knopf = NSButton(
-                title: "\(kategorie.anzeigename) (\(index + 1))",
+                title: "\(kategorie.anzeigename) (⌘\(index + 1))",
                 target: self,
                 action: #selector(kategorieGeklickt(_:))
             )
             knopf.tag = index
             knopf.bezelStyle = .rounded
             knopf.controlSize = .small
-            knopf.toolTip = "Taste \(index + 1) macht dasselbe"
+            knopf.toolTip = "⌘\(index + 1) macht dasselbe"
             knopfleiste.addArrangedSubview(knopf)
         }
 
-        let verwerfen = NSButton(title: "Verwerfen (⌫)", target: self, action: #selector(verwerfenGeklickt))
-        verwerfen.toolTip = "Rücktaste macht dasselbe"
-        let gruppe = NSButton(title: "Gehört zu … (G)", target: self, action: #selector(gruppeGeklickt))
-        gruppe.toolTip = "Als weitere Schreibweise an einen bekannten Eintrag hängen. Taste G macht dasselbe."
+        let kopieren = NSButton(title: "Geschützten Text kopieren", target: self, action: #selector(kopierenGeklickt))
+        kopieren.bezelStyle = .rounded
+        kopieren.controlSize = .regular
+        kopieren.keyEquivalent = "\r"
+        kopieren.keyEquivalentModifierMask = [.command]
+        kopieren.toolTip = "⌘⏎ macht dasselbe und merkt dabei alle offenen Vermutungen"
+        knopfleiste.addArrangedSubview(kopieren)
+
+        let verwerfen = NSButton(title: "Verwerfen", target: self, action: #selector(verwerfenGeklickt))
+        verwerfen.toolTip = "Diese Stelle bleibt im Klartext stehen"
+        let gruppe = NSButton(title: "Gehört zu … (⌘D)", target: self, action: #selector(gruppeGeklickt))
+        gruppe.toolTip = "Als weitere Schreibweise an einen bekannten Eintrag hängen. ⌘D macht dasselbe."
         let neu = NSButton(title: "Neuer Text (⌘N)", target: self, action: #selector(neuEinlesen))
         neu.toolTip = "Liest, was jetzt in der Zwischenablage liegt. Der bisherige Text wird verworfen."
-        bearbeitenKnopf = NSButton(title: "Text bearbeiten (⌘E)", target: self, action: #selector(bearbeitenUmschalten))
-        bearbeitenKnopf.toolTip = "Am Originaltext tippen. Danach wird neu geprüft."
+        vorschauKnopf = NSButton(title: "Vorschau (⌘E)", target: self, action: #selector(vorschauUmschalten))
+        vorschauKnopf.toolTip = "Zeigt den Text mit eingesetzten Platzhaltern, so wie er rausgeht."
         let leeren = NSButton(title: "Leeren", target: self, action: #selector(leeren))
         leeren.toolTip = "Wirft den Text weg. Das Wörterbuch bleibt."
-        for knopf in [verwerfen, gruppe, bearbeitenKnopf, leeren, neu] {
+        for knopf in [verwerfen, gruppe, vorschauKnopf, leeren, neu] {
             knopf.bezelStyle = .rounded
             knopf.controlSize = .small
             knopfleiste.addArrangedSubview(knopf)
@@ -216,7 +234,7 @@ final class SchutzAnsicht: NSView {
 
     // MARK: Darstellung
 
-    private func aktualisiere() {
+    private func aktualisiere(schreibmarke: NSRange? = nil) {
         reihenfolge = analyse.funde
             .filter { !$0.verworfen }
             .sorted { $0.bereich.location < $1.bereich.location }
@@ -224,11 +242,16 @@ final class SchutzAnsicht: NSView {
         auswahl = reihenfolge.isEmpty ? 0 : min(auswahl, reihenfolge.count - 1)
 
         let gewaehlt = reihenfolge.indices.contains(auswahl) ? reihenfolge[auswahl] : nil
-        let aufbau = Chiptext.aufbauen(analyse: analyse, ausgewaehlt: gewaehlt)
+        let aufbau = inVorschau
+            ? Chiptext.aufbauen(analyse: analyse, ausgewaehlt: gewaehlt)
+            : Chiptext.aufbauenOriginal(analyse: analyse, ausgewaehlt: gewaehlt)
         bereiche = aufbau.bereiche
         textAnsicht.textStorage?.setAttributedString(aufbau.text)
+        if let schreibmarke, NSMaxRange(schreibmarke) <= textAnsicht.string.count {
+            textAnsicht.setSelectedRange(schreibmarke)
+        }
 
-        if !imBearbeitungsmodus { beschrifteKopf() }
+        beschrifteKopf()
 
         liste.zeige(
             analyse.funde.sorted { $0.bereich.location < $1.bereich.location }.map(listenzeile),
@@ -305,7 +328,6 @@ final class SchutzAnsicht: NSView {
     }
 
     private func aktualisiereWerkzeuge() {
-        guard !imBearbeitungsmodus else { return }
         let fund = aktuellerFund
         for ansicht in knopfleiste.arrangedSubviews {
             guard let knopf = ansicht as? NSButton else { continue }
@@ -325,6 +347,8 @@ final class SchutzAnsicht: NSView {
 
         decknameFeld.isEnabled = fund != nil && !(fund?.verworfen ?? true)
         decknameFeld.stringValue = fund?.verworfen == false ? (fund?.platzhalter ?? "") : ""
+        originalFeld.isEnabled = fund != nil
+        originalFeld.stringValue = fund?.text ?? ""
     }
 
     private var aktuellerFund: Fund? {
@@ -362,25 +386,11 @@ final class SchutzAnsicht: NSView {
     /// Liefert `true`, wenn der Tastendruck erledigt ist.
     @discardableResult
     func verarbeite(_ ereignis: NSEvent) -> Bool {
-        // Im Deckname-Feld gehören die Tasten dem Feld.
-        if decknameFeld.currentEditor() != nil {
+        // In den beiden Textfeldern gehören die Tasten dem Feld.
+        if decknameFeld.currentEditor() != nil || originalFeld.currentEditor() != nil {
             return false
         }
 
-        // Beim Tippen am Originaltext auch: sonst legt die 1 eine Person an,
-        // statt eine Eins zu schreiben. Nur ⌘E und ⎋ kommen durch.
-        if imBearbeitungsmodus {
-            let zusatz = ereignis.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            if zusatz.contains(.command), ereignis.charactersIgnoringModifiers?.lowercased() == "e" {
-                bearbeitenUmschalten()
-                return true
-            }
-            if ereignis.keyCode == 53 {
-                bearbeitenUmschalten()
-                return true
-            }
-            return false
-        }
 
         let zusatz = ereignis.modifierFlags.intersection(.deviceIndependentFlagsMask)
         if zusatz.contains(.command) {
@@ -389,14 +399,23 @@ final class SchutzAnsicht: NSView {
                 neuEinlesen()
                 return true
             case "e":
-                bearbeitenUmschalten()
+                vorschauUmschalten()
                 return true
             case "f":
-                guard !imBearbeitungsmodus else { return false }
                 suche.oeffne()
                 return true
             case "g":
                 if zusatz.contains(.shift) { suche.vorheriger() } else { suche.naechster() }
+                return true
+            case "1", "2", "3", "4", "5":
+                if let ziffer = Int(ereignis.charactersIgnoringModifiers ?? ""),
+                   Kategorie.schnellwahl.indices.contains(ziffer - 1) {
+                    setzeKategorie(Kategorie.schnellwahl[ziffer - 1])
+                    return true
+                }
+                return false
+            case "d":
+                gruppeUebernehmen()
                 return true
             default:
                 break
@@ -406,34 +425,24 @@ final class SchutzAnsicht: NSView {
         }
 
         switch ereignis.keyCode {
-        case 36, 76:  // Return, Enter
-            uebernehmen(merken: zusatz.contains(.command))
+        case 36, 76 where zusatz.contains(.command):  // ⌘⏎
+            uebernehmen(merken: true)
             return true
         case 53:  // Escape
             abbrechen()
             return true
-        case 126:  // Pfeil hoch
+        case 126 where zusatz.contains(.option):  // ⌥ Pfeil hoch
             waehle(auswahl - 1)
             return true
-        case 125:  // Pfeil runter
+        case 125 where zusatz.contains(.option):  // ⌥ Pfeil runter
             waehle(auswahl + 1)
-            return true
-        case 51, 117:  // Rücktaste, Entfernen
-            verwerfeAktuellen()
             return true
         default:
             break
         }
 
-        guard let zeichen = ereignis.charactersIgnoringModifiers?.lowercased() else { return false }
-        if let ziffer = Int(zeichen), (1...Kategorie.schnellwahl.count).contains(ziffer) {
-            setzeKategorie(Kategorie.schnellwahl[ziffer - 1])
-            return true
-        }
-        if zeichen == "g" {
-            gruppeUebernehmen()
-            return true
-        }
+        // Ziffern und Buchstaben ohne Befehlstaste gehören dem Text: er ist
+        // bearbeitbar, da soll eine 1 eine 1 schreiben.
         return false
     }
 
@@ -472,6 +481,8 @@ final class SchutzAnsicht: NSView {
         guard Kategorie.schnellwahl.indices.contains(absender.tag) else { return }
         setzeKategorie(Kategorie.schnellwahl[absender.tag])
     }
+
+    @objc private func kopierenGeklickt() { uebernehmen(merken: false) }
 
     @objc private func verwerfenGeklickt() { verwerfeAktuellen() }
 
@@ -596,10 +607,18 @@ final class SchutzAnsicht: NSView {
 
     // MARK: Für den Selbsttest
 
-    func bearbeitenUmschaltenFuerPruefung() { bearbeitenUmschalten() }
     func leerenFuerPruefung() { leeren() }
-    func setzeBearbeitungstextFuerPruefung(_ text: String) { bearbeitung.text.string = text }
+    func setzeTextFuerPruefung(_ text: String) {
+        textAnsicht.string = text
+        pruefeJetzt()
+    }
+    func istInVorschauFuerPruefung() -> Bool { inVorschau }
+    func vorschauUmschaltenFuerPruefung() { vorschauUmschalten() }
     func waehleFundFuerPruefung(_ kennung: UUID) { waehleFund(kennung) }
+    func setzeOriginalFuerPruefung(_ text: String) {
+        originalFeld.stringValue = text
+        originalUebernehmen()
+    }
 
     /// Liegt die Fundstelle im sichtbaren Ausschnitt? Genau das ist gemeint,
     /// wenn der Text zur angeklickten Stelle springen soll.
@@ -618,63 +637,51 @@ final class SchutzAnsicht: NSView {
 
     // MARK: Bearbeiten
 
-    /// Schaltet zwischen Chiptext und Originaltext um. Beim Zurückschalten
-    /// wird neu geprüft; das Wörterbuch bleibt, was schon gemerkt ist, greift
-    /// also sofort wieder.
-    @objc private func bearbeitenUmschalten() {
-        if imBearbeitungsmodus {
-            let getippt = bearbeitung.text.string
-            imBearbeitungsmodus = false
-            analyse = Schleuse.analysiere(getippt, woerterbuch: analyse.woerterbuch)
-            auswahl = 0
-            zeigeModus()
-            aktualisiere()
-            window?.makeFirstResponder(textAnsicht)
-        } else {
-            bearbeitung.text.string = analyse.original
-            imBearbeitungsmodus = true
-            zeigeModus()
-            window?.makeFirstResponder(bearbeitung.text)
-            zeigeMeldung(nil)
-        }
+    /// Schaltet zwischen dem bearbeitbaren Original und der Vorschau um.
+    @objc private func vorschauUmschalten() {
+        inVorschau.toggle()
+        textAnsicht.isEditable = !inVorschau
+        vorschauKnopf.title = inVorschau ? "Original (⌘E)" : "Vorschau (⌘E)"
+        aktualisiere()
+        if !inVorschau { window?.makeFirstResponder(textAnsicht) }
     }
 
     /// Wirft den Text weg und lässt dich gleich tippen. Ohne das müsste man
     /// erst irgendwas anderes kopieren, um den alten Text loszuwerden.
     @objc private func leeren() {
+        inVorschau = false
+        textAnsicht.isEditable = true
         analyse = Schleuse.analysiere("", woerterbuch: analyse.woerterbuch)
         auswahl = 0
-        bearbeitung.text.string = ""
-        imBearbeitungsmodus = true
-        zeigeModus()
         aktualisiere()
-        window?.makeFirstResponder(bearbeitung.text)
+        window?.makeFirstResponder(textAnsicht)
     }
 
-    private func zeigeModus() {
-        rollflaeche.isHidden = imBearbeitungsmodus
-        bearbeitung.rolle.isHidden = !imBearbeitungsmodus
-        liste.isHidden = imBearbeitungsmodus
-        suche.isHidden = true
-        bearbeitenKnopf.title = imBearbeitungsmodus ? "Fertig, prüfen (⌘E)" : "Text bearbeiten (⌘E)"
-
-        for ansicht in knopfleiste.arrangedSubviews {
-            guard let knopf = ansicht as? NSButton, knopf !== bearbeitenKnopf else { continue }
-            // Beim Tippen gibt es keine Fundstelle, auf die sich etwas
-            // beziehen könnte.
-            if !knopf.title.hasPrefix("Leeren"), !knopf.title.hasPrefix("Neuer Text") {
-                knopf.isEnabled = !imBearbeitungsmodus
-            }
-        }
-        decknameFeld.isEnabled = !imBearbeitungsmodus && decknameFeld.isEnabled
-
-        if imBearbeitungsmodus {
-            kopfzeile.stringValue = "Originaltext bearbeiten"
-            regelzeile.stringValue = "Tippe, füge ein oder lösche. ⌘E prüft den Text danach neu."
+    /// Nimmt, was gerade im Textfeld steht, und prüft es neu.
+    ///
+    /// Läuft nach einer kurzen Pause, nicht bei jedem Anschlag: sonst würde
+    /// mitten im Tippen eines Namens dessen halbe Fassung gemerkt.
+    private func pruefeNachTippen() {
+        nachdenkpause?.invalidate()
+        nachdenkpause = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: false) { [weak self] _ in
+            self?.pruefeJetzt()
         }
     }
 
-    /// Holt sich, was jetzt in der Zwischenablage liegt, und fängt damit von
+    private func pruefeJetzt() {
+        let getippt = textAnsicht.string
+        guard getippt != analyse.original else { return }
+
+        // Die Schreibmarke merken und danach zurücksetzen: das Neuzeichnen
+        // ersetzt den ganzen Textspeicher und würde sie sonst an den Anfang
+        // werfen.
+        let marke = textAnsicht.selectedRange()
+        analyse = Schleuse.analysiere(getippt, woerterbuch: analyse.woerterbuch)
+        auswahl = 0
+        aktualisiere(schreibmarke: marke)
+    }
+
+    /// Holt sich, was jetzt in der Zwischenablage liegt    /// Holt sich, was jetzt in der Zwischenablage liegt, und fängt damit von
     /// vorn an. Das Wörterbuch bleibt, alles andere am alten Text ist weg.
     @objc private func neuEinlesen() {
         guard let text = Zwischenablage.lies() else {
@@ -692,6 +699,29 @@ final class SchutzAnsicht: NSView {
         zeigeMeldung(nil)
         aktualisiere()
         textAnsicht.scroll(NSPoint(x: 0, y: 0))
+    }
+
+    /// ⏎ im Original-Feld: den Text an dieser Stelle austauschen. Danach steht
+    /// der Cursor im Deckname-Feld, also da, wo man als Nächstes hinwill.
+    @objc private func originalUebernehmen() {
+        guard let fund = aktuellerFund else { return }
+        let eingabe = originalFeld.stringValue
+        guard eingabe != fund.text else {
+            window?.makeFirstResponder(decknameFeld)
+            return
+        }
+
+        do {
+            try Schleuse.ersetzeOriginaltext(fundId: fund.id, durch: eingabe, in: &analyse)
+            zeigeMeldung(nil)
+            aktualisiere()
+            waehleFund(fund.id)
+            window?.makeFirstResponder(decknameFeld)
+            decknameFeld.currentEditor()?.selectAll(nil)
+        } catch {
+            zeigeMeldung(error.localizedDescription)
+            originalFeld.currentEditor()?.selectAll(nil)
+        }
     }
 
     /// ⏎ im Deckname-Feld: übernehmen und weiter zur nächsten offenen Stelle.
@@ -756,11 +786,18 @@ extension SchutzAnsicht: NSTextFieldDelegate {
         textView: NSTextView,
         doCommandBy befehl: Selector
     ) -> Bool {
-        guard steuerelement === decknameFeld, befehl == #selector(NSResponder.cancelOperation(_:)) else {
-            return false
+        guard befehl == #selector(NSResponder.cancelOperation(_:)) else { return false }
+        if steuerelement === decknameFeld {
+            decknameAbbrechen()
+            return true
         }
-        decknameAbbrechen()
-        return true
+        if steuerelement === originalFeld {
+            originalFeld.stringValue = aktuellerFund?.text ?? ""
+            zeigeMeldung(nil)
+            window?.makeFirstResponder(textAnsicht)
+            return true
+        }
+        return false
     }
 }
 
@@ -782,6 +819,12 @@ extension SchutzAnsicht: NSTextViewDelegate {
         else { return false }
         waehleFund(uuid)
         return true
+    }
+
+    /// Jede Eingabe im Text löst nach einer kurzen Pause eine neue Prüfung aus.
+    func textDidChange(_ meldung: Notification) {
+        guard meldung.object as AnyObject? === textAnsicht, !inVorschau else { return }
+        pruefeNachTippen()
     }
 
     /// Sobald du im Text markierst, ändert sich, was die Kategorieknöpfe tun.

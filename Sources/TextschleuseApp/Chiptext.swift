@@ -67,6 +67,50 @@ enum Chiptext {
         return NSRange(location: kleinste, length: groesste - kleinste)
     }
 
+    /// Der Originaltext, unverändert, mit farbig hinterlegten Fundstellen.
+    ///
+    /// Anders als `aufbauen` schiebt das nichts dazwischen. Genau deshalb
+    /// lässt sich damit tippen: was dasteht, ist Zeichen für Zeichen der
+    /// Originaltext, und eine Eingabe verschiebt nichts, was die App nicht
+    /// nachvollziehen könnte. Welcher Deckname zu welcher Stelle gehört, sagt
+    /// die Liste daneben.
+    static func aufbauenOriginal(analyse: Analyse, ausgewaehlt: UUID?) -> Ergebnis {
+        let original = analyse.original as NSString
+        let ergebnis = NSMutableAttributedString(
+            string: analyse.original,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 13),
+                .foregroundColor: NSColor.labelColor,
+            ]
+        )
+
+        var bereiche: [UUID: NSRange] = [:]
+        for fund in analyse.funde.sorted(by: { $0.bereich.location < $1.bereich.location }) {
+            guard NSMaxRange(fund.bereich) <= original.length else { continue }
+            bereiche[fund.id] = fund.bereich
+
+            if fund.verworfen {
+                ergebnis.addAttributes([
+                    .strikethroughStyle: NSUnderlineStyle.single.rawValue,
+                    .foregroundColor: NSColor.tertiaryLabelColor,
+                ], range: fund.bereich)
+                continue
+            }
+
+            let farbe = farbe(fuer: fund)
+            ergebnis.addAttributes([
+                .backgroundColor: farbe.withAlphaComponent(fund.id == ausgewaehlt ? 0.34 : 0.16),
+            ], range: fund.bereich)
+            if fund.id == ausgewaehlt {
+                ergebnis.addAttributes([
+                    .underlineStyle: NSUnderlineStyle.thick.rawValue,
+                    .underlineColor: farbe,
+                ], range: fund.bereich)
+            }
+        }
+        return Ergebnis(text: ergebnis, bereiche: bereiche)
+    }
+
     static func aufbauen(analyse: Analyse, ausgewaehlt: UUID?) -> Ergebnis {
         let original = analyse.original as NSString
         let funde = analyse.funde.sorted { $0.bereich.location < $1.bereich.location }

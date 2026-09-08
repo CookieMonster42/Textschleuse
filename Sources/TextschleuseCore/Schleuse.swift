@@ -475,6 +475,68 @@ public enum Schleuse {
         return [(text: fund.text, platzhalter: fund.platzhalter)]
     }
 
+    // MARK: Originaltext einer Fundstelle
+
+    public enum TextFehler: LocalizedError, Equatable {
+        case leer
+
+        public var errorDescription: String? {
+            switch self {
+            case .leer:
+                return "Leer geht nicht. Wenn die Stelle gar nicht geschützt werden soll, wirf sie raus."
+            }
+        }
+    }
+
+    /// Ersetzt den Originaltext einer Fundstelle.
+    ///
+    /// Für den Fall, dass die Erkennung zu viel oder zu wenig erwischt hat —
+    /// „Herrn Nyström" statt „Nyström" — oder dass im eingefügten Text ein
+    /// Tippfehler steckt. Alle Fundstellen dahinter rücken mit, sonst zeigen
+    /// ihre Bereiche nach der Änderung auf die falschen Zeichen.
+    ///
+    /// Der Deckname bleibt: du korrigierst, wie die Stelle dasteht, nicht wen
+    /// sie meint.
+    public static func ersetzeOriginaltext(
+        fundId: UUID,
+        durch neuerText: String,
+        in analyse: inout Analyse
+    ) throws {
+        let geputzt = neuerText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !geputzt.isEmpty else { throw TextFehler.leer }
+        guard let index = analyse.funde.firstIndex(where: { $0.id == fundId }) else { return }
+
+        let alterBereich = analyse.funde[index].bereich
+        guard analyse.funde[index].text != geputzt else { return }
+
+        let text = NSMutableString(string: analyse.original)
+        guard NSMaxRange(alterBereich) <= text.length else { return }
+        text.replaceCharacters(in: alterBereich, with: geputzt)
+
+        let neueLaenge = (geputzt as NSString).length
+        let verschiebung = neueLaenge - alterBereich.length
+
+        analyse.original = text as String
+        analyse.funde[index].text = geputzt
+        analyse.funde[index].bereich = NSRange(location: alterBereich.location, length: neueLaenge)
+
+        // Alles, was hinter der geänderten Stelle liegt, rückt mit.
+        for weiterer in analyse.funde.indices where weiterer != index {
+            let bereich = analyse.funde[weiterer].bereich
+            guard bereich.location >= NSMaxRange(alterBereich) else { continue }
+            analyse.funde[weiterer].bereich = NSRange(
+                location: bereich.location + verschiebung,
+                length: bereich.length
+            )
+        }
+
+        // Die Sitzungszuordnung zeigt sonst weiter auf die alte Schreibweise.
+        if analyse.funde[index].eintragId == nil {
+            analyse.unbekannte[analyse.funde[index].platzhalter] = geputzt
+        }
+        analyse.funde.sort { $0.bereich.location < $1.bereich.location }
+    }
+
     // MARK: Deckname
 
     /// Gibt der Fundstelle einen anderen Decknamen.
