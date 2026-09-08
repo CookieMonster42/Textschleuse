@@ -35,6 +35,7 @@ enum Selbsttest {
         fehler += pruefeInlineDecknamen()
         fehler += pruefeWiderruf()
         fehler += pruefeSitzung()
+        fehler += pruefeZuordnenImRueckweg()
 
         print("")
         print(fehler == 0 ? "Alles in Ordnung." : "\(fehler) Punkt(e) fehlgeschlagen.")
@@ -974,6 +975,74 @@ enum Selbsttest {
         } else {
             print("✗ Sitzung: das Hauptfenster zeigt „\(gezeigt?.analyse.original ?? "nichts")\"")
             fehler += 1
+        }
+        return fehler
+    }
+
+    /// Ein Platzhalter, den das Wörterbuch nicht kennt, muss sich im Rückweg
+    /// zuordnen lassen — sonst bleibt der Text für immer halb aufgelöst.
+    private static func pruefeZuordnenImRueckweg() -> Int {
+        var fehler = 0
+        var buch = Woerterbuch()
+        let eintrag = buch.anlegen(text: "Thorben Nyström", kategorie: .person)
+
+        let antwort = "Bitte melde dich bei UNBEKANNT_3 wegen des Termins."
+        let ergebnis = Rueckweg.analysiere(antwort, woerterbuch: buch)
+
+        var gesichert: Woerterbuch?
+        let ansicht = RueckwegAnsicht(ergebnis: ergebnis, woerterbuch: buch)
+        ansicht.beiWoerterbuchAenderung = { gesichert = $0 }
+
+        let fenster = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1000, height: 640),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        fenster.contentView = ansicht
+        fenster.layoutIfNeeded()
+        defer { fenster.orderOut(nil) }
+
+        if ansicht.offeneFuerPruefung() == 1 {
+            print("✓ Zuordnen: der unbekannte Platzhalter wird als offen gemeldet")
+        } else {
+            print("✗ Zuordnen: \(ansicht.offeneFuerPruefung()) offene statt einer")
+            fehler += 1
+        }
+
+        ansicht.waehleFundFuerPruefung(0)
+        if ansicht.zuordnenFuerPruefung(zu: eintrag.id) {
+            print("✓ Zuordnen: die Zuordnung wird angenommen")
+        } else {
+            print("✗ Zuordnen: die Zuordnung schlug fehl")
+            fehler += 1
+        }
+
+        if ansicht.offeneFuerPruefung() == 0, ansicht.ergebnis.ergebnis.contains("Thorben Nyström") {
+            print("✓ Zuordnen: der Text löst danach vollständig auf")
+        } else {
+            print("✗ Zuordnen: es bleibt etwas offen")
+            fehler += 1
+        }
+
+        // Und die Änderung muss nach oben gemeldet worden sein, sonst wäre sie
+        // beim nächsten Text wieder weg.
+        if gesichert?.klartext(fuerPlatzhalter: "UNBEKANNT_3") == "Thorben Nyström" {
+            print("✓ Zuordnen: das geänderte Wörterbuch wird nach oben gemeldet")
+        } else {
+            print("✗ Zuordnen: die Änderung kam nicht oben an")
+            fehler += 1
+        }
+
+        // Ein späterer Text muss davon profitieren.
+        if let gesichert {
+            let spaeter = Rueckweg.analysiere("Nochmal UNBEKANNT_3 fragen.", woerterbuch: gesichert)
+            if spaeter.offen.isEmpty {
+                print("✓ Zuordnen: auch ein späterer Text geht damit auf")
+            } else {
+                print("✗ Zuordnen: der spätere Text bleibt offen")
+                fehler += 1
+            }
         }
         return fehler
     }

@@ -16,6 +16,7 @@ final class Hauptfenster: NSWindowController {
     private let woerterbuch: () -> Woerterbuch
     private let beimSchuetzen: (Analyse, Bool) -> Void
     private let beimZurueckdrehen: (String) -> Void
+    private let beimWoerterbuch: (Woerterbuch) -> Void
     /// Die Texte dieser Sitzung. Geteilt mit den Popups, damit beide Wege
     /// denselben Stand sehen.
     private let sitzung: Sitzung
@@ -43,7 +44,8 @@ final class Hauptfenster: NSWindowController {
         woerterbuch: @escaping () -> Woerterbuch,
         sitzung: Sitzung,
         beimSchuetzen: @escaping (Analyse, Bool) -> Void,
-        beimZurueckdrehen: @escaping (String) -> Void
+        beimZurueckdrehen: @escaping (String) -> Void,
+        beimWoerterbuch: @escaping (Woerterbuch) -> Void
     ) {
         if let vorhandenes = offen {
             // Beim Wiederaufmachen den neuesten Stand zeigen — womöglich hat
@@ -57,7 +59,8 @@ final class Hauptfenster: NSWindowController {
             woerterbuch: woerterbuch,
             sitzung: sitzung,
             beimSchuetzen: beimSchuetzen,
-            beimZurueckdrehen: beimZurueckdrehen
+            beimZurueckdrehen: beimZurueckdrehen,
+            beimWoerterbuch: beimWoerterbuch
         )
         offen = fenster
         fenster.showWindow(nil)
@@ -69,9 +72,11 @@ final class Hauptfenster: NSWindowController {
         woerterbuch: @escaping () -> Woerterbuch,
         sitzung: Sitzung,
         beimSchuetzen: @escaping (Analyse, Bool) -> Void,
-        beimZurueckdrehen: @escaping (String) -> Void
+        beimZurueckdrehen: @escaping (String) -> Void,
+        beimWoerterbuch: @escaping (Woerterbuch) -> Void = { _ in }
     ) {
         self.woerterbuch = woerterbuch
+        self.beimWoerterbuch = beimWoerterbuch
         self.sitzung = sitzung
         self.beimSchuetzen = beimSchuetzen
         self.beimZurueckdrehen = beimZurueckdrehen
@@ -273,6 +278,9 @@ final class Hauptfenster: NSWindowController {
             ansicht.beiUebernahme = { [weak self] fertig in
                 self?.beimZurueckdrehen(fertig)
                 self?.rueckwegEingabe.melde("In die Zwischenablage gelegt.")
+            }
+            ansicht.beiWoerterbuchAenderung = { [weak self] geaendert in
+                self?.beimWoerterbuch(geaendert)
             }
             ansicht.beiAbbruch = { [weak self] in
                 guard let self else { return }

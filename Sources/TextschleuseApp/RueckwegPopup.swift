@@ -13,6 +13,12 @@ final class RueckwegPopup: TastaturPanel {
     private let ansicht: RueckwegAnsicht
     private let abschluss: (Ausgang) -> Void
 
+    /// Reicht eine Zuordnung nach oben, damit sie gespeichert wird.
+    var beiWoerterbuchAenderung: ((Woerterbuch) -> Void)? {
+        get { ansicht.beiWoerterbuchAenderung }
+        set { ansicht.beiWoerterbuchAenderung = newValue }
+    }
+
     init(
         ergebnis: RueckwegErgebnis,
         woerterbuch: Woerterbuch = Woerterbuch(),

@@ -453,6 +453,46 @@ public struct Woerterbuch: Codable, Sendable {
         return name
     }
 
+    /// Hängt einen Decknamen an einen bestehenden Eintrag, ohne dessen
+    /// aktuellen Namen zu ändern.
+    ///
+    /// Der Fall kommt vom Rückweg: in einer KI-Antwort steht `UNBEKANNT_3`
+    /// oder `PERSON_9` aus einer Sitzung, die es nicht mehr gibt. Wer weiß,
+    /// wer gemeint war, sagt es hier einmal — danach löst der Name dauerhaft
+    /// auf, auch in jeder späteren Antwort.
+    @discardableResult
+    public mutating func ordneDecknameZu(_ eingabe: String, zu eintragId: UUID) throws -> String {
+        let name = try pruefeDeckname(eingabe, fuer: eintragId)
+        guard let index = eintraege.firstIndex(where: { $0.id == eintragId }) else { return name }
+        guard eintraege[index].platzhalter.uppercased() != name else { return name }
+        if !eintraege[index].fruehereDecknamen.contains(where: { $0.uppercased() == name }) {
+            eintraege[index].fruehereDecknamen.append(name)
+        }
+        return name
+    }
+
+    /// Legt einen Eintrag an, der von Anfang an einen bestimmten Decknamen
+    /// trägt. Für den Rückweg: `UNBEKANNT_3` war „Thorben Nyström", und das
+    /// soll ab jetzt so bleiben.
+    @discardableResult
+    public mutating func anlegen(
+        text: String,
+        kategorie: Kategorie,
+        deckname eingabe: String
+    ) throws -> Eintrag {
+        let sauber = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sauber.isEmpty else { throw EintragFehler.leer }
+        let name = try pruefeDeckname(eingabe, fuer: nil)
+        try pruefeFreienBegriff(sauber, ausser: UUID())
+
+        var eintrag = anlegen(text: sauber, kategorie: kategorie)
+        eintrag.eigenerDeckname = name
+        if let index = eintraege.firstIndex(where: { $0.id == eintrag.id }) {
+            eintraege[index] = eintrag
+        }
+        return eintrag
+    }
+
     /// Nimmt den eigenen Decknamen zurück. Der Eintrag heißt danach wieder
     /// `PERSON_7`.
     public mutating func decknameZuruecksetzen(_ eintragId: UUID) {

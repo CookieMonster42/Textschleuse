@@ -9,8 +9,12 @@ final class RueckwegAnsicht: NSView {
     var beiUebernahme: ((String) -> Void)?
     var beiAbbruch: (() -> Void)?
 
+    /// Läuft, wenn ein Deckname zugeordnet wurde. Die Änderung muss nach oben
+    /// und in die Datei, sonst ist sie beim nächsten Text wieder weg.
+    var beiWoerterbuchAenderung: ((Woerterbuch) -> Void)?
+
     private(set) var ergebnis: RueckwegErgebnis
-    private let woerterbuch: Woerterbuch
+    private var woerterbuch: Woerterbuch
     private let unbekannte: [String: String]
 
     private var auswahl = 0
@@ -42,6 +46,19 @@ final class RueckwegAnsicht: NSView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("nicht unterstützt") }
+
+    func zuordnenFuerPruefung(zu eintragId: UUID) -> Bool {
+        guard let fund = aktuellerFund, !fund.istAufloesbar else { return false }
+        do {
+            try woerterbuch.ordneDecknameZu(fund.normal, zu: eintragId)
+            uebernimmWoerterbuch("")
+            return true
+        } catch {
+            return false
+        }
+    }
+    func waehleFundFuerPruefung(_ index: Int) { auswahl = index; aktualisiere() }
+    func offeneFuerPruefung() -> Int { ergebnis.offen.count }
 
     func setze(ergebnis neues: RueckwegErgebnis) {
         ergebnis = neues
@@ -75,11 +92,17 @@ final class RueckwegAnsicht: NSView {
 
         knopfleiste.orientation = .horizontal
         knopfleiste.spacing = 6
+        let zuordnen = NSButton(title: "Zu Eintrag zuordnen …", target: self, action: #selector(zuordnen))
+        zuordnen.toolTip = "Sagt einmal, wer hinter diesem Platzhalter steckt. Gilt danach dauerhaft."
+        let anlegen = NSButton(title: "Als neuen Eintrag …", target: self, action: #selector(neuAnlegen))
+        anlegen.toolTip = "Legt den Klartext im Wörterbuch an und bindet den Platzhalter daran."
         let neu = NSButton(title: "Neuer Text (⌘N)", target: self, action: #selector(neuEinlesen))
         neu.toolTip = "Liest, was jetzt in der Zwischenablage liegt."
-        neu.bezelStyle = .rounded
-        neu.controlSize = .small
-        knopfleiste.addArrangedSubview(neu)
+        for knopf in [zuordnen, anlegen, neu] {
+            knopf.bezelStyle = .rounded
+            knopf.controlSize = .small
+            knopfleiste.addArrangedSubview(knopf)
+        }
 
         meldung.font = .systemFont(ofSize: 11)
         meldung.textColor = .systemRed
@@ -88,7 +111,8 @@ final class RueckwegAnsicht: NSView {
 
         fusszeile.font = .systemFont(ofSize: 11)
         fusszeile.textColor = .secondaryLabelColor
-        fusszeile.stringValue = "⏎ Kopieren · ↑ ↓ Platzhalter · ⌘F Suchen · ⌘N Neuer Text · ⎋ Abbrechen"
+        fusszeile.stringValue = "⏎ Kopieren · ↑ ↓ Platzhalter · ⌘F Suchen · ⌘N Neuer Text · ⎋ Abbrechen. "
+            + "Was rot ist, kennt das Wörterbuch nicht — unten zuordnen, dann geht es dauerhaft auf."
 
         let mitte = NSStackView(views: [rollflaeche, liste])
         mitte.orientation = .horizontal
@@ -150,6 +174,117 @@ final class RueckwegAnsicht: NSView {
             textAnsicht.scrollRangeToVisible(bereich)
         }
         suche.aktualisiere()
+        aktualisiereKnoepfe()
+    }
+
+    /// Zuordnen geht nur bei einem Platzhalter, der noch offen ist. Bei den
+    /// aufgelösten gibt es nichts zu entscheiden.
+    private func aktualisiereKnoepfe() {
+        let offen = aktuellerFund?.istAufloesbar == false
+        for ansicht in knopfleiste.arrangedSubviews {
+            guard let knopf = ansicht as? NSButton else { continue }
+            if knopf.title.hasPrefix("Zu Eintrag") {
+                knopf.isEnabled = offen && !woerterbuch.eintraege.isEmpty
+            } else if knopf.title.hasPrefix("Als neuen") {
+                knopf.isEnabled = offen
+            }
+        }
+    }
+
+    private var aktuellerFund: PlatzhalterFund? {
+        let sortiert = ergebnis.funde.sorted { $0.bereich.location < $1.bereich.location }
+        guard sortiert.indices.contains(auswahl) else { return nil }
+        return sortiert[auswahl]
+    }
+
+    // MARK: Zuordnen
+
+    @objc private func zuordnen() {
+        guard let fund = aktuellerFund, !fund.istAufloesbar else { return }
+        guard let ziel = EintragWaehler.frage(
+            woerterbuch: woerterbuch,
+            fuer: fund.normal,
+            vorschlag: nil
+        ) else { return }
+
+        do {
+            try woerterbuch.ordneDecknameZu(fund.normal, zu: ziel.id)
+            uebernimmWoerterbuch("\(fund.normal) ist jetzt \(ziel.text).")
+        } catch {
+            meldeFehler(error.localizedDescription)
+        }
+    }
+
+    @objc private func neuAnlegen() {
+        guard let fund = aktuellerFund, !fund.istAufloesbar else { return }
+        guard let (text, kategorie) = frageNachEintrag(fuer: fund.normal) else { return }
+
+        do {
+            _ = try woerterbuch.anlegen(text: text, kategorie: kategorie, deckname: fund.normal)
+            uebernimmWoerterbuch("\(fund.normal) ist jetzt \(text).")
+        } catch {
+            meldeFehler(error.localizedDescription)
+        }
+    }
+
+    /// Nach der Zuordnung neu auflösen und die Änderung nach oben melden.
+    private func uebernimmWoerterbuch(_ satz: String) {
+        beiWoerterbuchAenderung?(woerterbuch)
+        ergebnis = Rueckweg.analysiere(
+            ergebnis.original,
+            woerterbuch: woerterbuch,
+            unbekannte: unbekannte
+        )
+        aktualisiere()
+        meldung.textColor = .secondaryLabelColor
+        meldung.stringValue = satz
+        meldung.isHidden = false
+    }
+
+    private func meldeFehler(_ text: String) {
+        meldung.textColor = .systemRed
+        meldung.stringValue = text
+        meldung.isHidden = false
+    }
+
+    /// Fragt nach Klartext und Typ für einen neuen Eintrag.
+    private func frageNachEintrag(fuer platzhalter: String) -> (String, Kategorie)? {
+        let feld = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
+        feld.placeholderString = "Wer oder was steckt dahinter?"
+
+        let wahl = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 320, height: 25))
+        for kategorie in Kategorie.allCases where kategorie != .unbekannt {
+            wahl.addItem(withTitle: kategorie.anzeigename)
+            wahl.lastItem?.representedObject = kategorie.rawValue
+        }
+        // Aus PERSON_3 lässt sich der Typ ablesen; aus UNBEKANNT_3 nicht.
+        if let passend = Kategorie.allCases.first(where: { platzhalter.hasPrefix($0.praefix + "_") }),
+           passend != .unbekannt {
+            wahl.selectItem(withTitle: passend.anzeigename)
+        }
+
+        let stapel = NSStackView(views: [feld, wahl])
+        stapel.orientation = .vertical
+        stapel.spacing = 8
+        stapel.alignment = .leading
+        stapel.frame = NSRect(x: 0, y: 0, width: 320, height: 60)
+
+        let frage = NSAlert()
+        frage.messageText = "Was ist \(platzhalter)?"
+        frage.informativeText = "Der Eintrag wandert ins Wörterbuch und behält diesen Platzhalter. "
+            + "Damit löst er auch in künftigen Antworten auf."
+        frage.accessoryView = stapel
+        frage.window.initialFirstResponder = feld
+        frage.addButton(withTitle: "Anlegen")
+        frage.addButton(withTitle: "Abbrechen")
+
+        guard frage.runModal() == .alertFirstButtonReturn else { return nil }
+        let text = feld.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty,
+              let roh = wahl.selectedItem?.representedObject as? String,
+              let kategorie = Kategorie(rawValue: roh)
+        else { return nil }
+        return (text, kategorie)
     }
 
     private func beschrifteKopf() {
