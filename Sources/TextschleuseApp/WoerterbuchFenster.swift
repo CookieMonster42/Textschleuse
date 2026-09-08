@@ -15,6 +15,7 @@ final class WoerterbuchFenster: NSWindowController {
     fileprivate let editor = EintragEditor()
     private let zaehler = NSTextField(labelWithString: "")
     private let suchfeld = NSSearchField()
+    private let aufloesungZeile = NSTextField(wrappingLabelWithString: "")
 
     /// Flachgeklopfte Darstellung: Hauptnennung, danach ihre Aliase.
     private struct Zeile {
@@ -99,7 +100,7 @@ final class WoerterbuchFenster: NSWindowController {
         editor.translatesAutoresizingMaskIntoConstraints = false
         editor.beiBefehl = { [weak self] befehl in self?.fuehreAus(befehl) }
 
-        suchfeld.placeholderString = "Filtern"
+        suchfeld.placeholderString = "Begriff oder Deckname, etwa PERSON_3"
         suchfeld.target = self
         suchfeld.action = #selector(gefiltert)
         suchfeld.sendsWholeSearchString = false
@@ -130,7 +131,10 @@ final class WoerterbuchFenster: NSWindowController {
         hinweis.font = .systemFont(ofSize: 11)
         hinweis.textColor = .secondaryLabelColor
 
-        let links = NSStackView(views: [suchfeld, rollflaeche])
+        aufloesungZeile.font = .systemFont(ofSize: 12)
+        aufloesungZeile.isHidden = true
+
+        let links = NSStackView(views: [suchfeld, aufloesungZeile, rollflaeche])
         links.orientation = .vertical
         links.spacing = 8
         links.translatesAutoresizingMaskIntoConstraints = false
@@ -171,8 +175,11 @@ final class WoerterbuchFenster: NSWindowController {
             .filter { eintrag in
                 guard !filter.isEmpty else { return true }
                 return eintrag.text.lowercased().contains(filter)
-                    || eintrag.platzhalter.lowercased().contains(filter)
                     || eintrag.aliase.contains { $0.text.lowercased().contains(filter) }
+                    // Alle Decknamen, auch die von Schreibweisen und die
+                    // früheren — sonst findest du nicht, was in einer alten
+                    // Mail steht.
+                    || eintrag.alleDecknamen.contains { $0.lowercased().contains(filter) }
             }
             .sorted { ($0.kategorie.praefix, $0.nummer) < ($1.kategorie.praefix, $1.nummer) }
             .flatMap { eintrag -> [Zeile] in
@@ -203,9 +210,33 @@ final class WoerterbuchFenster: NSWindowController {
             ? "\(anzahl) Einträge, davon \(automatisch) automatisch erkannt"
             : "\(Set(zeilen.map(\.eintragId)).count) von \(anzahl) Einträgen"
 
+        beschrifteAufloesung()
         tabelle.reloadData()
         stelleAuswahlWiederHer()
         editor.zeige(ausgewaehlt.flatMap { woerterbuch.eintrag(mitId: $0) })
+    }
+
+    /// Die Antwort auf „wer war nochmal PERSON_3?" in einem Satz, direkt über
+    /// der Liste. Erscheint nur, wenn die Eingabe wirklich ein Deckname ist.
+    private func beschrifteAufloesung() {
+        guard let treffer = woerterbuch.aufloesen(suchfeld.stringValue) else {
+            // Auch den Text leeren, nicht nur ausblenden: eine versteckte
+            // Beschriftung mit altem Inhalt ist eine Falle.
+            aufloesungZeile.stringValue = ""
+            aufloesungZeile.isHidden = true
+            return
+        }
+
+        var satz = "\(suchfeld.stringValue.uppercased()) ist \(treffer.klartext)"
+        if treffer.alias != nil {
+            satz += " — eine Schreibweise von \(treffer.eintrag.text)"
+        }
+        if treffer.istFrueherer {
+            satz += ". Früherer Deckname, heute heißt der Eintrag \(treffer.eintrag.platzhalter)"
+        }
+        aufloesungZeile.stringValue = satz + "."
+        aufloesungZeile.textColor = treffer.istFrueherer ? .secondaryLabelColor : .labelColor
+        aufloesungZeile.isHidden = false
     }
 
     private func stelleAuswahlWiederHer() {
@@ -258,6 +289,10 @@ final class WoerterbuchFenster: NSWindowController {
     // MARK: Aktionen
 
     @objc private func gefiltert() { aktualisiere() }
+
+    /// Wie `gefiltert`, aber von außen aufrufbar. Das Suchfeld meldet sich bei
+    /// programmgesteuerter Eingabe nicht von selbst.
+    func filterGeaendert() { aktualisiere() }
 
     @objc private func loescheAuswahl() {
         let betroffen = Set(tabelle.selectedRowIndexes.compactMap { zeilen[$0].eintragId })

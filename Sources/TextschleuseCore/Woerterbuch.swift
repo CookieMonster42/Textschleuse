@@ -335,6 +335,57 @@ public struct Woerterbuch: Codable, Sendable {
         Set(eintraege.flatMap(\.alleDecknamen))
     }
 
+    /// Was hinter einem Decknamen steckt, mit der Herkunft dazu.
+    public struct Aufloesung: Sendable {
+        public var eintrag: Eintrag
+        /// Der Klartext: die Hauptnennung oder die Schreibweise.
+        public var klartext: String
+        /// Gesetzt, wenn der Deckname zu einer Schreibweise gehört.
+        public var alias: Alias?
+        /// Der Eintrag heißt inzwischen anders; dieser Name ist von früher.
+        public var istFrueherer: Bool
+    }
+
+    /// Schlägt einen Decknamen nach. Anders als `klartext(fuerPlatzhalter:)`
+    /// sagt das hier auch, zu welchem Eintrag er gehört und ob er noch aktuell
+    /// ist — für die Frage „wer war nochmal PERSON_3?".
+    ///
+    /// Schreibweisen und frühere Namen zählen mit. Auch Leerzeichen und
+    /// Bindestriche statt Unterstrich werden verstanden, weil Modelle
+    /// `PERSON 3` schreiben.
+    public func aufloesen(_ eingabe: String) -> Aufloesung? {
+        let gesucht = eingabe
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+            .replacingOccurrences(of: " ", with: "_")
+            .replacingOccurrences(of: "-", with: "_")
+        guard !gesucht.isEmpty else { return nil }
+
+        for eintrag in eintraege {
+            let aktuell = eintrag.platzhalter.uppercased()
+            for name in [eintrag.platzhalter] + eintrag.fruehereDecknamen {
+                let istFrueherer = name.uppercased() != aktuell
+                if name.uppercased() == gesucht {
+                    return Aufloesung(
+                        eintrag: eintrag,
+                        klartext: eintrag.text,
+                        alias: nil,
+                        istFrueherer: istFrueherer
+                    )
+                }
+                for alias in eintrag.aliase where "\(name)\(alias.suffix)".uppercased() == gesucht {
+                    return Aufloesung(
+                        eintrag: eintrag,
+                        klartext: alias.text,
+                        alias: alias,
+                        istFrueherer: istFrueherer
+                    )
+                }
+            }
+        }
+        return nil
+    }
+
     // MARK: Umbenennen
 
     public enum DecknamenFehler: LocalizedError, Equatable {
