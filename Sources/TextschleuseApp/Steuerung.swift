@@ -17,8 +17,23 @@ final class Steuerung: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ meldung: Notification) {
         ladeWoerterbuch()
+        baueHauptmenue()
         baueMenueleiste()
         meldeKurzbefehleAn()
+        NSApp.setActivationPolicy(Einstellungen.gemeinsam.nurMenueleiste ? .accessory : .regular)
+        if !Einstellungen.gemeinsam.nurMenueleiste { zeigeHauptfenster() }
+    }
+
+    /// Beim Klick aufs Dock-Symbol das Fenster wieder aufmachen.
+    func applicationShouldHandleReopen(_ anwendung: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        if !hasVisibleWindows { zeigeHauptfenster() }
+        return true
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ anwendung: NSApplication) -> Bool {
+        // Nein: die App lebt in der Menüleiste weiter, damit die Kurzbefehle
+        // greifen. Beenden geht über das Menü.
+        false
     }
 
     func applicationWillTerminate(_ meldung: Notification) {
@@ -67,6 +82,16 @@ final class Steuerung: NSObject, NSApplicationDelegate {
         )
         zurueck.target = self
         menue.addItem(zurueck)
+
+        menue.addItem(.separator())
+
+        let fenster = NSMenuItem(
+            title: "Fenster zeigen",
+            action: #selector(zeigeHauptfenster),
+            keyEquivalent: ""
+        )
+        fenster.target = self
+        menue.addItem(fenster)
 
         menue.addItem(.separator())
 
@@ -127,9 +152,115 @@ final class Steuerung: NSObject, NSApplicationDelegate {
         offenesPopup = nil
     }
 
+    // MARK: Hauptfenster
+
+    @objc func zeigeHauptfenster() {
+        Hauptfenster.zeige(
+            woerterbuch: { [weak self] in self?.woerterbuch ?? Woerterbuch() },
+            sitzungsZuordnung: { [weak self] in self?.letzteUnbekannte ?? [:] },
+            beimSchuetzen: { [weak self] analyse, merken in
+                self?.uebernimmSchutz(analyse, merken: merken)
+            },
+            beimZurueckdrehen: { text in Zwischenablage.schreib(text) }
+        )
+    }
+
+    /// Das Menü oben am Bildschirm. Ohne das gäbe es kein ⌘V, kein ⌘C und
+    /// keinen Weg, die App über die Oberfläche zu beenden.
+    private func baueHauptmenue() {
+        let leiste = NSMenu()
+
+        let programm = NSMenuItem()
+        let programmMenue = NSMenu()
+        programmMenue.addItem(withTitle: "Über Textschleuse", action: #selector(zeigeUeber), keyEquivalent: "")
+            .target = self
+        programmMenue.addItem(.separator())
+        programmMenue.addItem(withTitle: "Einstellungen …", action: #selector(zeigeEinstellungen), keyEquivalent: ",")
+            .target = self
+        programmMenue.addItem(withTitle: "Wörterbuch …", action: #selector(zeigeWoerterbuch), keyEquivalent: "d")
+            .target = self
+        programmMenue.addItem(.separator())
+        programmMenue.addItem(
+            withTitle: "Textschleuse ausblenden",
+            action: #selector(NSApplication.hide(_:)),
+            keyEquivalent: "h"
+        )
+        programmMenue.addItem(.separator())
+        programmMenue.addItem(
+            withTitle: "Textschleuse beenden",
+            action: #selector(NSApplication.terminate(_:)),
+            keyEquivalent: "q"
+        )
+        programm.submenu = programmMenue
+        leiste.addItem(programm)
+
+        let ablage = NSMenuItem()
+        let ablageMenue = NSMenu(title: "Ablage")
+        ablageMenue.addItem(withTitle: "Fenster zeigen", action: #selector(zeigeHauptfenster), keyEquivalent: "0")
+            .target = self
+        ablageMenue.addItem(
+            withTitle: "Zwischenablage schützen",
+            action: #selector(schuetzeZwischenablage),
+            keyEquivalent: "s"
+        ).target = self
+        ablageMenue.addItem(
+            withTitle: "Zwischenablage zurückdrehen",
+            action: #selector(dreheZurueck),
+            keyEquivalent: "r"
+        ).target = self
+        ablageMenue.addItem(.separator())
+        ablageMenue.addItem(withTitle: "Fenster schließen", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        ablage.submenu = ablageMenue
+        leiste.addItem(ablage)
+
+        // Ohne dieses Menü gibt es kein Einfügen per Tastatur. AppKit hängt
+        // die Befehle an die Menüeinträge, nicht an die Textfelder.
+        let bearbeiten = NSMenuItem()
+        let bearbeitenMenue = NSMenu(title: "Bearbeiten")
+        for (titel, aktion, taste) in [
+            ("Widerrufen", Selector(("undo:")), "z"),
+            ("Wiederholen", Selector(("redo:")), "Z"),
+        ] {
+            bearbeitenMenue.addItem(withTitle: titel, action: aktion, keyEquivalent: taste)
+        }
+        bearbeitenMenue.addItem(.separator())
+        for (titel, aktion, taste) in [
+            ("Ausschneiden", #selector(NSText.cut(_:)), "x"),
+            ("Kopieren", #selector(NSText.copy(_:)), "c"),
+            ("Einfügen", #selector(NSText.paste(_:)), "v"),
+            ("Alles auswählen", #selector(NSText.selectAll(_:)), "a"),
+        ] {
+            bearbeitenMenue.addItem(withTitle: titel, action: aktion, keyEquivalent: taste)
+        }
+        bearbeiten.submenu = bearbeitenMenue
+        leiste.addItem(bearbeiten)
+
+        let fensterMenue = NSMenu(title: "Fenster")
+        let fenster = NSMenuItem()
+        fenster.submenu = fensterMenue
+        leiste.addItem(fenster)
+
+        NSApp.mainMenu = leiste
+        NSApp.windowsMenu = fensterMenue
+    }
+
+    @objc private func zeigeUeber() {
+        NSApp.activate(ignoringOtherApps: true)
+        let meldung = NSAlert()
+        meldung.messageText = "Textschleuse"
+        meldung.informativeText = """
+            Ersetzt Namen, Adressen und Bankdaten durch Platzhalter, bevor der Text             in ein KI-Tool geht — und dreht die Antwort wieder zurück.
+
+            Alles bleibt auf diesem Rechner. Es geht nichts ins Netz.
+
+            risiq intern
+            """
+        meldung.runModal()
+    }
+
     // MARK: Schützen
 
-    @objc private func schuetzeZwischenablage() {
+    @objc func schuetzeZwischenablage() {
         // Ein noch offenes Popup wird geschlossen, nicht nach vorn geholt.
         // Der Kurzbefehl heißt: nimm, was jetzt in der Zwischenablage liegt.
         schliesseOffenes()
@@ -180,7 +311,7 @@ final class Steuerung: NSObject, NSApplicationDelegate {
 
     // MARK: Rückweg
 
-    @objc private func dreheZurueck() {
+    @objc func dreheZurueck() {
         schliesseOffenes()
         let ergebnis = Rueckweg.analysiere(
             Zwischenablage.lies() ?? "",
@@ -203,7 +334,7 @@ final class Steuerung: NSObject, NSApplicationDelegate {
 
     // MARK: Menüeinträge
 
-    @objc private func zeigeWoerterbuch() {
+    @objc func zeigeWoerterbuch() {
         NSApp.activate(ignoringOtherApps: true)
         WoerterbuchFenster.zeige(
             woerterbuch: woerterbuch,
@@ -217,16 +348,42 @@ final class Steuerung: NSObject, NSApplicationDelegate {
         )
     }
 
-    @objc private func zeigeEinstellungen() {
+    @objc func zeigeEinstellungen() {
         NSApp.activate(ignoringOtherApps: true)
+        let einstellungen = Einstellungen.gemeinsam
+
+        let nurLeiste = NSButton(checkboxWithTitle: "Nur in der Menüleiste, kein Dock-Symbol", target: nil, action: nil)
+        nurLeiste.state = einstellungen.nurMenueleiste ? .on : .off
+        let hinweise = NSButton(checkboxWithTitle: "KI-Hinweis mitkopieren", target: nil, action: nil)
+        hinweise.state = einstellungen.hinweiseMitkopieren ? .on : .off
+        hinweise.toolTip = "Ein paar Zeilen vor dem Text mit der Bitte, die Platzhalter stehen zu lassen."
+
+        let stapel = NSStackView(views: [nurLeiste, hinweise])
+        stapel.orientation = .vertical
+        stapel.alignment = .leading
+        stapel.spacing = 6
+        stapel.frame = NSRect(x: 0, y: 0, width: 340, height: 50)
+
         let meldung = NSAlert()
-        meldung.messageText = "Einstellungen kommen in der nächsten Ausbaustufe"
+        meldung.messageText = "Einstellungen"
         meldung.informativeText = """
-            Kurzbefehle: \(Einstellungen.gemeinsam.kurzbefehlSchuetzen.beschriftung) zum Schützen, \
-            \(Einstellungen.gemeinsam.kurzbefehlRueckweg.beschriftung) zum Zurückdrehen. \
-            Popup öffnet sich \(Einstellungen.gemeinsam.popupPosition.anzeigename.lowercased()).
+            Kurzbefehle: \(einstellungen.kurzbefehlSchuetzen.beschriftung) zum Schützen, \
+            \(einstellungen.kurzbefehlRueckweg.beschriftung) zum Zurückdrehen. Sie lassen sich \
+            in dieser Ausbaustufe noch nicht ändern.
+
+            Das Popup öffnet sich \(einstellungen.popupPosition.anzeigename.lowercased()).
             """
-        meldung.runModal()
+        meldung.accessoryView = stapel
+        meldung.addButton(withTitle: "Übernehmen")
+        meldung.addButton(withTitle: "Abbrechen")
+        guard meldung.runModal() == .alertFirstButtonReturn else { return }
+
+        einstellungen.hinweiseMitkopieren = hinweise.state == .on
+        let neuNurLeiste = nurLeiste.state == .on
+        guard neuNurLeiste != einstellungen.nurMenueleiste else { return }
+        einstellungen.nurMenueleiste = neuNurLeiste
+        NSApp.setActivationPolicy(neuNurLeiste ? .accessory : .regular)
+        if !neuNurLeiste { zeigeHauptfenster() }
     }
 
     // MARK: Backup

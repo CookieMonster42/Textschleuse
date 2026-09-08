@@ -28,6 +28,7 @@ enum Selbsttest {
         fehler += pruefeSuche()
         fehler += pruefeMarkierenImPopup()
         fehler += pruefeWoerterbuchfenster()
+        fehler += pruefeHauptfenster()
 
         print("")
         print(fehler == 0 ? "Alles in Ordnung." : "\(fehler) Punkt(e) fehlgeschlagen.")
@@ -511,6 +512,103 @@ enum Selbsttest {
             fehler += 1
         }
         return fehler
+    }
+
+    /// Das Hauptfenster: gibt es beide Reiter, ein Eingabefeld, und wird aus
+    /// eingefügtem Text eine Arbeitsfläche?
+    private static func pruefeHauptfenster() -> Int {
+        var fehler = 0
+        var buch = Woerterbuch()
+        var gesichert: Analyse?
+
+        let fenster = Hauptfenster(
+            woerterbuch: { buch },
+            sitzungsZuordnung: { [:] },
+            beimSchuetzen: { analyse, _ in gesichert = analyse },
+            beimZurueckdrehen: { _ in }
+        )
+        fenster.window?.layoutIfNeeded()
+        defer { fenster.close() }
+
+        guard let inhalt = fenster.window?.contentView else {
+            print("✗ Hauptfenster: kein Inhalt")
+            return 1
+        }
+
+        let reiter = reiterSuchen(in: inhalt)
+        if reiter?.numberOfTabViewItems == 2 {
+            print("✓ Hauptfenster: zwei Reiter, Schützen und Zurückdrehen")
+        } else {
+            print("✗ Hauptfenster: \(reiter?.numberOfTabViewItems ?? -1) Reiter statt 2")
+            fehler += 1
+        }
+
+        // Ohne Text darf keine Arbeitsfläche entstehen.
+        if schutzflaecheSuchen(in: inhalt) == nil {
+            print("✓ Hauptfenster: startet mit dem Eingabefeld, nicht mit einer leeren Fläche")
+        } else {
+            print("✗ Hauptfenster: die Arbeitsfläche steht schon vor der Eingabe da")
+            fehler += 1
+        }
+
+        // Text einfügen und prüfen lassen.
+        guard let eingabe = eingabeSuchen(in: inhalt) else {
+            print("✗ Hauptfenster: kein Eingabefeld gefunden")
+            return fehler + 1
+        }
+        eingabe.setzeText("Herr Nyström schrieb an almut@example.org.")
+        eingabe.loeseAus()
+        fenster.window?.layoutIfNeeded()
+
+        guard let flaeche = schutzflaecheSuchen(in: inhalt) else {
+            print("✗ Hauptfenster: nach dem Prüfen kommt keine Arbeitsfläche")
+            return fehler + 1
+        }
+        if flaeche.analyse.funde.isEmpty {
+            print("✗ Hauptfenster: die Arbeitsfläche hat keine Fundstellen")
+            fehler += 1
+        } else {
+            print("✓ Hauptfenster: aus eingefügtem Text wird eine Arbeitsfläche "
+                + "mit \(flaeche.analyse.funde.count) Fundstellen")
+        }
+
+        // Übernehmen muss nach oben gemeldet werden.
+        flaeche.uebernehmen(merken: false)
+        if gesichert != nil {
+            print("✓ Hauptfenster: Übernehmen meldet das Ergebnis nach oben")
+        } else {
+            print("✗ Hauptfenster: Übernehmen kam nicht an")
+            fehler += 1
+        }
+
+        _ = buch
+        return fehler
+    }
+
+    private static func reiterSuchen(in ansicht: NSView) -> NSTabView? {
+        if let treffer = ansicht as? NSTabView { return treffer }
+        for unter in ansicht.subviews {
+            if let treffer = reiterSuchen(in: unter) { return treffer }
+        }
+        return nil
+    }
+
+    private static func eingabeSuchen(in ansicht: NSView) -> Eingabeflaeche? {
+        if let treffer = ansicht as? Eingabeflaeche, treffer.window != nil || treffer.superview != nil {
+            return treffer
+        }
+        for unter in ansicht.subviews {
+            if let treffer = eingabeSuchen(in: unter) { return treffer }
+        }
+        return nil
+    }
+
+    private static func schutzflaecheSuchen(in ansicht: NSView) -> SchutzAnsicht? {
+        if let treffer = ansicht as? SchutzAnsicht { return treffer }
+        for unter in ansicht.subviews {
+            if let treffer = schutzflaecheSuchen(in: unter) { return treffer }
+        }
+        return nil
     }
 
     private static func suchfeldSuchen(in ansicht: NSView) -> NSSearchField? {

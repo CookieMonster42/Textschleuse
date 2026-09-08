@@ -37,7 +37,9 @@ cat > "$BUNDLE/Contents/Info.plist" <<PLIST
     <key>CFBundleVersion</key>           <string>$VERSION</string>
     <key>LSMinimumSystemVersion</key>    <string>14.0</string>
     <!-- Kein Dock-Icon, kein Programmmenü. Die App lebt in der Menüleiste. -->
-    <key>LSUIElement</key>               <true/>
+    <!-- Kein LSUIElement mehr: die App hat ein Fenster und ein Dock-Symbol.
+         Wer nur die Menüleiste will, stellt das in den Einstellungen um;
+         dann setzt die App die Aktivierungsart zur Laufzeit. -->
     <key>NSHumanReadableCopyright</key>  <string>risiq intern</string>
 </dict>
 </plist>
@@ -50,7 +52,55 @@ echo "→ Signieren"
 codesign --force --sign - --identifier "$BUNDLE_ID" "$BUNDLE"
 codesign --verify --verbose "$BUNDLE" 2>&1 | sed 's/^/   /'
 
-if [[ "${1:-}" == "--install" ]]; then
+if [[ "${1:-}" == "--dmg" ]]; then
+    echo "→ DMG bauen"
+    BUEHNE=".build/dmg-buehne"
+    rm -rf "$BUEHNE" ".build/Textschleuse-$VERSION.dmg"
+    mkdir -p "$BUEHNE"
+    cp -R "$BUNDLE" "$BUEHNE/Textschleuse.app"
+    # Verknüpfung, damit man die App im Fenster nach rechts ziehen kann.
+    ln -s /Applications "$BUEHNE/Programme"
+
+    cat > "$BUEHNE/Bitte lesen.txt" <<'HINWEIS'
+Textschleuse — Installation
+
+1. Textschleuse.app auf "Programme" ziehen.
+2. Beim ersten Start: rechte Maustaste auf die App, dann "Öffnen".
+   Danach im Dialog noch einmal "Öffnen" bestätigen.
+
+Warum der Umweg beim ersten Start?
+
+Die App ist nicht bei Apple registriert (keine Notarisierung). macOS
+blockiert sie deshalb beim Doppelklick. Der Rechtsklick-Weg ist die von
+Apple vorgesehene Ausnahme und ist nur einmal nötig.
+
+Was die App macht
+
+Text aus der Zwischenablage nehmen, Namen und Bankdaten durch
+Platzhalter ersetzen, Ergebnis zurück in die Zwischenablage. Die
+Rückrichtung genauso. Alles bleibt auf diesem Rechner, es geht nichts
+ins Netz.
+
+Kurzbefehle
+  ctrl-alt-cmd-S   Text schützen
+  ctrl-alt-cmd-R   Platzhalter zurückdrehen
+
+Prüfen, ob alles läuft
+
+  /Applications/Textschleuse.app/Contents/MacOS/Textschleuse --selbsttest
+
+risiq intern
+HINWEIS
+
+    hdiutil create \
+        -volname "Textschleuse $VERSION" \
+        -srcfolder "$BUEHNE" \
+        -ov -format UDZO -quiet \
+        ".build/Textschleuse-$VERSION.dmg"
+    rm -rf "$BUEHNE"
+    echo "   $PWD/.build/Textschleuse-$VERSION.dmg"
+    echo "   $(du -h ".build/Textschleuse-$VERSION.dmg" | cut -f1)"
+elif [[ "${1:-}" == "--install" ]]; then
     echo "→ Nach /Applications kopieren"
     rm -rf "/Applications/Textschleuse.app"
     cp -R "$BUNDLE" "/Applications/Textschleuse.app"
