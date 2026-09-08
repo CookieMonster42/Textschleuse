@@ -937,4 +937,107 @@ Pruefstand.pruefe("Markierung: Zuordnung zu einem Eintrag, den es nicht gibt") {
     Pruefstand.gleich(analyse.funde.count, vorher, "und ändert nichts")
 }
 
+Pruefstand.pruefe("Fundstelle: Originaltext korrigieren") {
+    let text = "Sehr geehrter Herrn Nyström, anbei die Unterlagen. Tel. 0621 1234567."
+    var analyse = Schleuse.analysiere(text, woerterbuch: Woerterbuch())
+
+    // Die Erkennung hat „Herrn Nyström" erwischt; richtig wäre nur der Name.
+    guard let zuViel = Schleuse.markiere(
+        bereich: (text as NSString).range(of: "Herrn Nyström"),
+        als: .person,
+        merken: false,
+        in: &analyse
+    ) else {
+        Pruefstand.wahr(false, "Markierung angelegt")
+        return
+    }
+
+    let telefonVorher = analyse.aktiveFunde.first { $0.kategorie == .telefon }
+    Pruefstand.wahr(telefonVorher != nil, "die Telefonnummer dahinter steht")
+
+    try? Schleuse.ersetzeOriginaltext(fundId: zuViel, durch: "Nyström", in: &analyse)
+
+    let fund = analyse.funde.first { $0.id == zuViel }
+    Pruefstand.gleich(fund?.text, "Nyström", "die Fundstelle heißt jetzt anders")
+    Pruefstand.enthaelt(analyse.original, "Sehr geehrter Nyström,", "und der Originaltext auch")
+
+    // Der Bereich der Nummer dahinter muss mitgerückt sein.
+    let telefon = analyse.aktiveFunde.first { $0.kategorie == .telefon }
+    let ausschnitt = (analyse.original as NSString).substring(with: telefon?.bereich ?? NSRange())
+    Pruefstand.gleich(ausschnitt, "0621 1234567", "die Fundstelle dahinter zeigt noch auf ihre Ziffern")
+
+    Pruefstand.enthaeltNicht(Schleuse.geschuetzterText(analyse), "Nyström", "geschützt wird die neue Fassung")
+}
+
+Pruefstand.pruefe("Fundstelle: Korrektur verlängert den Text") {
+    let text = "Jan Mai hat zugesagt. Rückfragen an a@b.de."
+    var analyse = Schleuse.analysiere(text, woerterbuch: Woerterbuch())
+    guard let fund = Schleuse.markiere(
+        bereich: (text as NSString).range(of: "Jan Mai"),
+        als: .person,
+        merken: false,
+        in: &analyse
+    ) else {
+        Pruefstand.wahr(false, "Markierung angelegt")
+        return
+    }
+
+    try? Schleuse.ersetzeOriginaltext(fundId: fund, durch: "Jan Maia", in: &analyse)
+    Pruefstand.enthaelt(analyse.original, "Jan Maia hat zugesagt", "der Text ist länger geworden")
+
+    let mail = analyse.aktiveFunde.first { $0.kategorie == .email }
+    let ausschnitt = (analyse.original as NSString).substring(with: mail?.bereich ?? NSRange())
+    Pruefstand.gleich(ausschnitt, "a@b.de", "die Adresse dahinter sitzt weiter richtig")
+}
+
+Pruefstand.pruefe("Fundstelle: Korrektur zieht die Sitzungszuordnung nach") {
+    let text = "Projekt Nordlicht läuft."
+    var analyse = Schleuse.analysiere(text, woerterbuch: Woerterbuch())
+    guard let fund = Schleuse.markiere(
+        bereich: (text as NSString).range(of: "Nordlicht"),
+        als: .begriff,
+        merken: false,
+        in: &analyse
+    ) else {
+        Pruefstand.wahr(false, "Markierung angelegt")
+        return
+    }
+    let platzhalter = analyse.funde.first { $0.id == fund }?.platzhalter ?? ""
+
+    try? Schleuse.ersetzeOriginaltext(fundId: fund, durch: "Nordlicht Süd", in: &analyse)
+    Pruefstand.gleich(analyse.unbekannte[platzhalter], "Nordlicht Süd",
+                      "der Rückweg setzt die korrigierte Fassung ein")
+
+    let zurueck = Rueckweg.analysiere(
+        Schleuse.geschuetzterText(analyse),
+        woerterbuch: analyse.woerterbuch,
+        unbekannte: analyse.unbekannte
+    )
+    Pruefstand.enthaelt(zurueck.ergebnis, "Nordlicht Süd", "und der Rückweg geht auf")
+}
+
+Pruefstand.pruefe("Fundstelle: leerer Text wird abgelehnt") {
+    let text = "Projekt Nordlicht läuft."
+    var analyse = Schleuse.analysiere(text, woerterbuch: Woerterbuch())
+    guard let fund = Schleuse.markiere(
+        bereich: (text as NSString).range(of: "Nordlicht"),
+        als: .begriff,
+        merken: false,
+        in: &analyse
+    ) else {
+        Pruefstand.wahr(false, "Markierung angelegt")
+        return
+    }
+
+    do {
+        try Schleuse.ersetzeOriginaltext(fundId: fund, durch: "   ", in: &analyse)
+        Pruefstand.wahr(false, "leerer Text wird abgelehnt")
+    } catch let fehler as Schleuse.TextFehler {
+        Pruefstand.gleich(fehler, .leer, "leerer Text wird abgelehnt")
+    } catch {
+        Pruefstand.wahr(false, "unerwarteter Fehler \(error)")
+    }
+    Pruefstand.gleich(analyse.original, text, "und der Text bleibt, wie er war")
+}
+
 Pruefstand.bilanzUndEnde()
