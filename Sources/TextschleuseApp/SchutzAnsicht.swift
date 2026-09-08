@@ -31,9 +31,9 @@ final class SchutzAnsicht: NSView {
     private let liste = Fundstellenliste()
     private lazy var suche = Textsuche(ziel: textAnsicht)
 
-    /// Zeigt statt des Originaltexts, was tatsächlich rausgeht — mit
-    /// eingesetzten Platzhaltern. Nur zum Ansehen.
-    private var inVorschau = false
+    /// Aus heißt: Originaltext mit Chips, also `Meier → PERSON_1` inline.
+    /// An heißt: nur der nackte Originaltext, wenn die Chips im Weg sind.
+    private var ohneChips = false
     private var vorschauKnopf = NSButton()
     /// Sammelt Tastenanschläge, damit nicht bei jedem Buchstaben der ganze
     /// Text neu durchsucht wird.
@@ -63,8 +63,7 @@ final class SchutzAnsicht: NSView {
     func setze(analyse neue: Analyse) {
         analyse = neue
         auswahl = 0
-        inVorschau = false
-        textAnsicht.isEditable = true
+
         textAnsicht.setSelectedRange(NSRange(location: 0, length: 0))
         zeigeMeldung(nil)
         aktualisiere()
@@ -196,14 +195,14 @@ final class SchutzAnsicht: NSView {
         knopfleiste.setViews([], in: .leading)
         for (index, kategorie) in Kategorie.schnellwahl.enumerated() {
             let knopf = NSButton(
-                title: "\(kategorie.anzeigename) (⌘\(index + 1))",
+                title: "\(kategorie.anzeigename) (\(index + 1))",
                 target: self,
                 action: #selector(kategorieGeklickt(_:))
             )
             knopf.tag = index
             knopf.bezelStyle = .rounded
             knopf.controlSize = .small
-            knopf.toolTip = "⌘\(index + 1) macht dasselbe"
+            knopf.toolTip = "Text markieren, dann \(index + 1) drücken — oder ⌘\(index + 1) ohne Markierung"
             knopfleiste.addArrangedSubview(knopf)
         }
 
@@ -217,12 +216,12 @@ final class SchutzAnsicht: NSView {
 
         let verwerfen = NSButton(title: "Verwerfen", target: self, action: #selector(verwerfenGeklickt))
         verwerfen.toolTip = "Diese Stelle bleibt im Klartext stehen"
-        let gruppe = NSButton(title: "Gehört zu … (⌘D)", target: self, action: #selector(gruppeGeklickt))
-        gruppe.toolTip = "Als weitere Schreibweise an einen bekannten Eintrag hängen. ⌘D macht dasselbe."
+        let gruppe = NSButton(title: "Gehört zu … (D)", target: self, action: #selector(gruppeGeklickt))
+        gruppe.toolTip = "Als weitere Schreibweise an einen bekannten Eintrag hängen. D bei markiertem Text, sonst ⌘D."
         let neu = NSButton(title: "Neuer Text (⌘N)", target: self, action: #selector(neuEinlesen))
         neu.toolTip = "Liest, was jetzt in der Zwischenablage liegt. Der bisherige Text wird verworfen."
-        vorschauKnopf = NSButton(title: "Vorschau (⌘E)", target: self, action: #selector(vorschauUmschalten))
-        vorschauKnopf.toolTip = "Zeigt den Text mit eingesetzten Platzhaltern, so wie er rausgeht."
+        vorschauKnopf = NSButton(title: "Nur Text (⌘E)", target: self, action: #selector(vorschauUmschalten))
+        vorschauKnopf.toolTip = "Blendet die Decknamen im Text aus. Bearbeiten geht in beiden Fällen."
         let leeren = NSButton(title: "Leeren", target: self, action: #selector(leeren))
         leeren.toolTip = "Wirft den Text weg. Das Wörterbuch bleibt."
         for knopf in [verwerfen, gruppe, vorschauKnopf, leeren, neu] {
@@ -234,7 +233,7 @@ final class SchutzAnsicht: NSView {
 
     // MARK: Darstellung
 
-    private func aktualisiere(schreibmarke: NSRange? = nil) {
+    private func aktualisiere(originalMarke: Int? = nil) {
         reihenfolge = analyse.funde
             .filter { !$0.verworfen }
             .sorted { $0.bereich.location < $1.bereich.location }
@@ -242,13 +241,14 @@ final class SchutzAnsicht: NSView {
         auswahl = reihenfolge.isEmpty ? 0 : min(auswahl, reihenfolge.count - 1)
 
         let gewaehlt = reihenfolge.indices.contains(auswahl) ? reihenfolge[auswahl] : nil
-        let aufbau = inVorschau
-            ? Chiptext.aufbauen(analyse: analyse, ausgewaehlt: gewaehlt)
-            : Chiptext.aufbauenOriginal(analyse: analyse, ausgewaehlt: gewaehlt)
+        let aufbau = ohneChips
+            ? Chiptext.aufbauenOriginal(analyse: analyse, ausgewaehlt: gewaehlt)
+            : Chiptext.aufbauen(analyse: analyse, ausgewaehlt: gewaehlt)
         bereiche = aufbau.bereiche
         textAnsicht.textStorage?.setAttributedString(aufbau.text)
-        if let schreibmarke, NSMaxRange(schreibmarke) <= textAnsicht.string.count {
-            textAnsicht.setSelectedRange(schreibmarke)
+        if let originalMarke {
+            let stelle = Chiptext.anzeigePosition(fuer: originalMarke, in: aufbau.text)
+            textAnsicht.setSelectedRange(NSRange(location: stelle, length: 0))
         }
 
         beschrifteKopf()
@@ -441,8 +441,24 @@ final class SchutzAnsicht: NSView {
             break
         }
 
-        // Ziffern und Buchstaben ohne Befehlstaste gehören dem Text: er ist
+        // Solange nichts markiert ist, gehören Ziffern dem Text: er ist
         // bearbeitbar, da soll eine 1 eine 1 schreiben.
+        //
+        // Ist etwas markiert, ist die Sache eindeutig: eine Ziffer würde die
+        // Markierung überschreiben, und das will niemand. Also heißt sie hier
+        // Kategorie.
+        guard textAnsicht.selectedRange().length > 0,
+              let zeichen = ereignis.charactersIgnoringModifiers?.lowercased()
+        else { return false }
+
+        if let ziffer = Int(zeichen), Kategorie.schnellwahl.indices.contains(ziffer - 1) {
+            setzeKategorie(Kategorie.schnellwahl[ziffer - 1])
+            return true
+        }
+        if zeichen == "d" {
+            gruppeUebernehmen()
+            return true
+        }
         return false
     }
 
@@ -473,6 +489,12 @@ final class SchutzAnsicht: NSView {
         auswahl = index
         zeigeMeldung(nil)
         aktualisiere()
+
+        // Die Stelle auch im Text markieren. Dann wirken 1 bis 5 direkt auf
+        // sie, ohne dass man sie nochmal mit der Maus einfangen muss.
+        if let bereich = bereiche[kennung], NSMaxRange(bereich) <= textAnsicht.string.count {
+            textAnsicht.setSelectedRange(bereich)
+        }
     }
 
     // MARK: Aktionen
@@ -612,9 +634,29 @@ final class SchutzAnsicht: NSView {
         textAnsicht.string = text
         pruefeJetzt()
     }
-    func istInVorschauFuerPruefung() -> Bool { inVorschau }
+    func istInVorschauFuerPruefung() -> Bool { ohneChips }
+    func darfAendernFuerPruefung(_ bereich: NSRange) -> Bool {
+        textView(textAnsicht, shouldChangeTextIn: bereich, replacementString: "x")
+    }
     func vorschauUmschaltenFuerPruefung() { vorschauUmschalten() }
     func waehleFundFuerPruefung(_ kennung: UUID) { waehleFund(kennung) }
+    func markiereFuerPruefung(_ bereich: NSRange) { textAnsicht.setSelectedRange(bereich) }
+    func tasteFuerPruefung(_ zeichen: String) -> Bool {
+        guard let ereignis = NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: zeichen,
+            charactersIgnoringModifiers: zeichen,
+            isARepeat: false,
+            keyCode: 0
+        ) else { return false }
+        return verarbeite(ereignis)
+    }
+
     func setzeOriginalFuerPruefung(_ text: String) {
         originalFeld.stringValue = text
         originalUebernehmen()
@@ -637,20 +679,28 @@ final class SchutzAnsicht: NSView {
 
     // MARK: Bearbeiten
 
-    /// Schaltet zwischen dem bearbeitbaren Original und der Vorschau um.
+    /// Schaltet die Chips ab und an. Bearbeitbar bleibt der Text in beiden
+    /// Fällen — die Chips sind nur Anzeige.
     @objc private func vorschauUmschalten() {
-        inVorschau.toggle()
-        textAnsicht.isEditable = !inVorschau
-        vorschauKnopf.title = inVorschau ? "Original (⌘E)" : "Vorschau (⌘E)"
-        aktualisiere()
-        if !inVorschau { window?.makeFirstResponder(textAnsicht) }
+        let marke = originalMarke()
+        ohneChips.toggle()
+        vorschauKnopf.title = ohneChips ? "Mit Decknamen (⌘E)" : "Nur Text (⌘E)"
+        aktualisiere(originalMarke: marke)
+        window?.makeFirstResponder(textAnsicht)
+    }
+
+    /// Die Schreibmarke, gezählt in Originalzeichen. Nur so übersteht sie ein
+    /// Neuzeichnen, bei dem die Decknamen ihre Länge ändern.
+    private func originalMarke() -> Int {
+        Chiptext.originalPosition(
+            fuer: textAnsicht.selectedRange().location,
+            in: textAnsicht.attributedString()
+        )
     }
 
     /// Wirft den Text weg und lässt dich gleich tippen. Ohne das müsste man
     /// erst irgendwas anderes kopieren, um den alten Text loszuwerden.
     @objc private func leeren() {
-        inVorschau = false
-        textAnsicht.isEditable = true
         analyse = Schleuse.analysiere("", woerterbuch: analyse.woerterbuch)
         auswahl = 0
         aktualisiere()
@@ -669,16 +719,15 @@ final class SchutzAnsicht: NSView {
     }
 
     private func pruefeJetzt() {
-        let getippt = textAnsicht.string
+        // Aus der Anzeige den Originaltext herausschälen: Pfeile und
+        // Decknamen sind Zutat der App und fallen weg.
+        let getippt = Chiptext.originaltext(aus: textAnsicht.attributedString())
         guard getippt != analyse.original else { return }
 
-        // Die Schreibmarke merken und danach zurücksetzen: das Neuzeichnen
-        // ersetzt den ganzen Textspeicher und würde sie sonst an den Anfang
-        // werfen.
-        let marke = textAnsicht.selectedRange()
+        let marke = originalMarke()
         analyse = Schleuse.analysiere(getippt, woerterbuch: analyse.woerterbuch)
         auswahl = 0
-        aktualisiere(schreibmarke: marke)
+        aktualisiere(originalMarke: marke)
     }
 
     /// Holt sich, was jetzt in der Zwischenablage liegt    /// Holt sich, was jetzt in der Zwischenablage liegt, und fängt damit von
@@ -821,9 +870,50 @@ extension SchutzAnsicht: NSTextViewDelegate {
         return true
     }
 
+    /// Verbietet Eingaben in den Decknamen. Der Originaltext links und rechts
+    /// davon bleibt frei — genau das ist gemeint mit „Text bearbeiten, Anzeige
+    /// nicht".
+    func textView(
+        _ ansicht: NSTextView,
+        shouldChangeTextIn bereich: NSRange,
+        replacementString ersatz: String?
+    ) -> Bool {
+        guard ansicht === textAnsicht else { return true }
+        let inhalt = textAnsicht.attributedString()
+
+        if bereich.length > 0 {
+            var beruehrt = false
+            inhalt.enumerateAttribute(Chiptext.istPlatzhalter, in: bereich) { wert, _, weiter in
+                if wert != nil {
+                    beruehrt = true
+                    weiter.pointee = true
+                }
+            }
+            if beruehrt {
+                zeigeMeldung("Den Decknamen im Text kann man nicht ändern. Das Feld unten schon.")
+                return false
+            }
+            return true
+        }
+
+        // Einfügemarke: nur mitten im Deckname sperren. An seinen Rändern
+        // soll man den Namen davor noch verlängern können.
+        let vorher = bereich.location > 0
+            ? inhalt.attribute(Chiptext.istPlatzhalter, at: bereich.location - 1, effectiveRange: nil) != nil
+            : false
+        let danach = bereich.location < inhalt.length
+            ? inhalt.attribute(Chiptext.istPlatzhalter, at: bereich.location, effectiveRange: nil) != nil
+            : false
+        if vorher && danach {
+            zeigeMeldung("Den Decknamen im Text kann man nicht ändern. Das Feld unten schon.")
+            return false
+        }
+        return true
+    }
+
     /// Jede Eingabe im Text löst nach einer kurzen Pause eine neue Prüfung aus.
     func textDidChange(_ meldung: Notification) {
-        guard meldung.object as AnyObject? === textAnsicht, !inVorschau else { return }
+        guard meldung.object as AnyObject? === textAnsicht else { return }
         pruefeNachTippen()
     }
 
