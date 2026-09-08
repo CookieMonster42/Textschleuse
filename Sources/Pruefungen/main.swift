@@ -743,4 +743,108 @@ Pruefstand.pruefe("Alte Datei ohne die neuen Felder lädt") {
     }
 }
 
+// MARK: Wörterbuch bearbeiten
+
+Pruefstand.pruefe("Bearbeiten: Begriff ändern") {
+    var buch = Woerterbuch()
+    let eintrag = buch.anlegen(text: "Thorben Nystrom", kategorie: .person)
+
+    try? buch.aendereText(eintrag.id, auf: "Thorben Nyström")
+    Pruefstand.gleich(buch.eintrag(mitId: eintrag.id)?.text, "Thorben Nyström", "Tippfehler behoben")
+    Pruefstand.gleich(buch.eintrag(mitId: eintrag.id)?.platzhalter, "PERSON_1",
+                      "der Deckname bleibt, sonst stimmen verschickte Texte nicht mehr")
+
+    do {
+        try buch.aendereText(eintrag.id, auf: "   ")
+        Pruefstand.wahr(false, "leerer Begriff wird abgelehnt")
+    } catch let fehler as Woerterbuch.EintragFehler {
+        Pruefstand.gleich(fehler, .leer, "leerer Begriff wird abgelehnt")
+    } catch {
+        Pruefstand.wahr(false, "unerwarteter Fehler \(error)")
+    }
+}
+
+Pruefstand.pruefe("Bearbeiten: Begriff schon vergeben") {
+    var buch = Woerterbuch()
+    _ = buch.anlegen(text: "Anna Beispiel", kategorie: .person)
+    let zweiter = buch.anlegen(text: "Bernd Beispiel", kategorie: .person)
+
+    do {
+        try buch.aendereText(zweiter.id, auf: "anna beispiel")
+        Pruefstand.wahr(false, "doppelter Begriff wird abgelehnt")
+    } catch let fehler as Woerterbuch.EintragFehler {
+        Pruefstand.gleich(fehler, .schonVorhanden("anna beispiel"), "doppelter Begriff wird abgelehnt")
+    } catch {
+        Pruefstand.wahr(false, "unerwarteter Fehler \(error)")
+    }
+    Pruefstand.gleich(buch.eintrag(mitId: zweiter.id)?.text, "Bernd Beispiel", "und nichts wurde geändert")
+}
+
+Pruefstand.pruefe("Bearbeiten: Kategorie ändern") {
+    var buch = Woerterbuch()
+    let eintrag = buch.anlegen(text: "Beispielbank Nord", kategorie: .person)
+    Pruefstand.gleich(buch.eintrag(mitId: eintrag.id)?.platzhalter, "PERSON_1", "vorher")
+
+    buch.aendereKategorie(eintrag.id, auf: .firma)
+    Pruefstand.gleich(buch.eintrag(mitId: eintrag.id)?.platzhalter, "FIRMA_1", "nachher")
+    Pruefstand.gleich(buch.klartext(fuerPlatzhalter: "PERSON_1"), "Beispielbank Nord",
+                      "der alte Deckname bleibt auflösbar")
+}
+
+Pruefstand.pruefe("Bearbeiten: Kategorie ändern kollidiert nicht") {
+    var buch = Woerterbuch()
+    _ = buch.anlegen(text: "Sparkasse Süd", kategorie: .firma)   // FIRMA_1
+    let person = buch.anlegen(text: "Beispielbank Nord", kategorie: .person)
+
+    buch.aendereKategorie(person.id, auf: .firma)
+    Pruefstand.gleich(buch.eintrag(mitId: person.id)?.platzhalter, "FIRMA_2",
+                      "es gibt eine frische Nummer, FIRMA_1 ist belegt")
+    Pruefstand.gleich(buch.klartext(fuerPlatzhalter: "FIRMA_1"), "Sparkasse Süd", "der andere bleibt er selbst")
+}
+
+Pruefstand.pruefe("Bearbeiten: eigener Deckname überlebt den Kategoriewechsel") {
+    var buch = Woerterbuch()
+    let eintrag = buch.anlegen(text: "Beispielbank Nord", kategorie: .person)
+    _ = try? buch.umbenennen(eintrag.id, auf: "HAUSBANK")
+
+    buch.aendereKategorie(eintrag.id, auf: .firma)
+    Pruefstand.gleich(buch.eintrag(mitId: eintrag.id)?.platzhalter, "HAUSBANK", "der eigene Name bleibt")
+    Pruefstand.gleich(buch.eintrag(mitId: eintrag.id)?.kategorie, .firma, "die Kategorie stimmt")
+}
+
+Pruefstand.pruefe("Bearbeiten: Schreibweisen") {
+    var buch = Woerterbuch()
+    let eintrag = buch.anlegen(text: "Thorben Nyström", kategorie: .person)
+    guard let alias = buch.aliasHinzufuegen("Nystrom", zu: eintrag.id) else {
+        Pruefstand.wahr(false, "Alias angelegt")
+        return
+    }
+    Pruefstand.gleich(buch.klartext(fuerPlatzhalter: "PERSON_1B"), "Nystrom", "vorher")
+
+    try? buch.aendereAlias(alias.id, in: eintrag.id, auf: "Nyström")
+    Pruefstand.gleich(buch.klartext(fuerPlatzhalter: "PERSON_1B"), "Nyström",
+                      "geändert, der Buchstabe bleibt")
+
+    buch.loescheAlias(alias.id, in: eintrag.id)
+    Pruefstand.gleich(buch.eintrag(mitId: eintrag.id)?.aliase.count, 0, "gelöscht")
+
+    // Der Buchstabe wird nicht neu vergeben.
+    let neuer = buch.aliasHinzufuegen("Nyström", zu: eintrag.id)
+    Pruefstand.gleich(neuer?.suffix, "B", "B ist wieder frei, weil er nicht mehr im Umlauf ist")
+}
+
+Pruefstand.pruefe("Bearbeiten: Schreibweise zur Hauptnennung machen") {
+    var buch = Woerterbuch()
+    let eintrag = buch.anlegen(text: "Nyström", kategorie: .person)
+    guard let alias = buch.aliasHinzufuegen("Thorben Nyström", zu: eintrag.id) else {
+        Pruefstand.wahr(false, "Alias angelegt")
+        return
+    }
+
+    buch.machtZurHauptnennung(alias.id, in: eintrag.id)
+    Pruefstand.gleich(buch.eintrag(mitId: eintrag.id)?.text, "Thorben Nyström", "die volle Form führt jetzt")
+    Pruefstand.gleich(buch.klartext(fuerPlatzhalter: "PERSON_1"), "Thorben Nyström", "PERSON_1 ist die Hauptnennung")
+    Pruefstand.gleich(buch.klartext(fuerPlatzhalter: "PERSON_1B"), "Nyström", "die Kurzform ist jetzt die Schreibweise")
+}
+
 Pruefstand.bilanzUndEnde()
