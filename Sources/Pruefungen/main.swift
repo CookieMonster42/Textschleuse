@@ -1040,4 +1040,66 @@ Pruefstand.pruefe("Fundstelle: leerer Text wird abgelehnt") {
     Pruefstand.gleich(analyse.original, text, "und der Text bleibt, wie er war")
 }
 
+Pruefstand.pruefe("Rückweg: unbekannten Decknamen zuordnen") {
+    var buch = Woerterbuch()
+    let eintrag = buch.anlegen(text: "Thorben Nyström", kategorie: .person)
+
+    // Eine Antwort aus einer Sitzung, die es nicht mehr gibt.
+    let antwort = "Bitte melde dich bei UNBEKANNT_3 wegen des Termins."
+    let vorher = Rueckweg.analysiere(antwort, woerterbuch: buch)
+    Pruefstand.gleich(vorher.offen.count, 1, "der Platzhalter bleibt zunächst offen")
+
+    _ = try? buch.ordneDecknameZu("UNBEKANNT_3", zu: eintrag.id)
+
+    let nachher = Rueckweg.analysiere(antwort, woerterbuch: buch)
+    Pruefstand.gleich(nachher.offen.count, 0, "nach der Zuordnung ist nichts mehr offen")
+    Pruefstand.enthaelt(nachher.ergebnis, "Thorben Nyström", "und der Name steht im Text")
+
+    // Der eigentliche Deckname bleibt, was er war.
+    Pruefstand.gleich(buch.eintrag(mitId: eintrag.id)?.platzhalter, "PERSON_1",
+                      "der aktuelle Deckname ändert sich nicht")
+    Pruefstand.enthaelt(
+        Rueckweg.analysiere("Frage an PERSON_1.", woerterbuch: buch).ergebnis,
+        "Thorben Nyström",
+        "und löst weiterhin auf"
+    )
+}
+
+Pruefstand.pruefe("Rückweg: Zuordnung zu einem fremden Decknamen wird abgelehnt") {
+    var buch = Woerterbuch()
+    let erster = buch.anlegen(text: "Anna Beispiel", kategorie: .person)
+    let zweiter = buch.anlegen(text: "Bernd Beispiel", kategorie: .person)
+
+    do {
+        _ = try buch.ordneDecknameZu("PERSON_1", zu: zweiter.id)
+        Pruefstand.wahr(false, "der Deckname eines anderen wird abgelehnt")
+    } catch let fehler as Woerterbuch.DecknamenFehler {
+        Pruefstand.gleich(fehler, .vergeben("PERSON_1"), "der Deckname eines anderen wird abgelehnt")
+    } catch {
+        Pruefstand.wahr(false, "unerwarteter Fehler \(error)")
+    }
+    Pruefstand.gleich(buch.klartext(fuerPlatzhalter: "PERSON_1"), "Anna Beispiel",
+                      "und PERSON_1 bleibt bei seinem Eintrag")
+    _ = erster
+}
+
+Pruefstand.pruefe("Rückweg: neuen Eintrag aus einem Platzhalter anlegen") {
+    var buch = Woerterbuch()
+    let eintrag = try? buch.anlegen(text: "Ilse Bergkamp", kategorie: .person, deckname: "UNBEKANNT_7")
+
+    Pruefstand.gleich(eintrag?.platzhalter, "UNBEKANNT_7", "der Eintrag trägt den Platzhalter")
+    Pruefstand.gleich(buch.klartext(fuerPlatzhalter: "UNBEKANNT_7"), "Ilse Bergkamp", "und löst auf")
+
+    let ergebnis = Rueckweg.analysiere("Grüße an UNBEKANNT_7.", woerterbuch: buch)
+    Pruefstand.enthaelt(ergebnis.ergebnis, "Ilse Bergkamp", "auch im ganzen Text")
+
+    // Ein zweites Mal derselbe Deckname geht nicht.
+    do {
+        _ = try buch.anlegen(text: "Anders Jemand", kategorie: .person, deckname: "UNBEKANNT_7")
+        Pruefstand.wahr(false, "doppelter Deckname wird abgelehnt")
+    } catch {
+        Pruefstand.wahr(true, "doppelter Deckname wird abgelehnt")
+    }
+}
+
 Pruefstand.bilanzUndEnde()

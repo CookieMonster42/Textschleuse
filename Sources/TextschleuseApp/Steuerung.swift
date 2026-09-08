@@ -161,7 +161,8 @@ final class Steuerung: NSObject, NSApplicationDelegate {
             beimSchuetzen: { [weak self] analyse, merken in
                 self?.uebernimmSchutz(analyse, merken: merken)
             },
-            beimZurueckdrehen: { text in Zwischenablage.schreib(text) }
+            beimZurueckdrehen: { text in Zwischenablage.schreib(text) },
+            beimWoerterbuch: { [weak self] geaendert in self?.uebernimmWoerterbuch(geaendert) }
         )
     }
 
@@ -341,8 +342,22 @@ final class Steuerung: NSObject, NSApplicationDelegate {
             guard case .uebernommen(let fertig) = ausgang else { return }
             Zwischenablage.schreib(fertig)
         }
+        popup.beiWoerterbuchAenderung = { [weak self] geaendert in
+            self?.uebernimmWoerterbuch(geaendert)
+        }
         offenesPopup = popup
         popup.zeige()
+    }
+
+    /// Nimmt ein geändertes Wörterbuch an und schreibt es weg. Eine Zuordnung
+    /// im Rückweg wäre sonst beim nächsten Text wieder verloren.
+    private func uebernimmWoerterbuch(_ geaendert: Woerterbuch) {
+        woerterbuch = geaendert
+        do {
+            try speicher.sichern(woerterbuch)
+        } catch {
+            zeigeFehler("Das Wörterbuch ließ sich nicht speichern", error)
+        }
     }
 
     // MARK: Menüeinträge
