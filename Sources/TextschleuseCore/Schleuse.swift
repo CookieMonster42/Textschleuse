@@ -304,6 +304,55 @@ public enum Schleuse {
         return fund.id
     }
 
+    /// Macht aus einer Markierung eine weitere Schreibweise eines bekannten
+    /// Eintrags.
+    ///
+    /// Für den Fall, dass derselbe Mensch im Text anders dasteht als im
+    /// Wörterbuch und die Automatik ihn deshalb für jemand anderen hält. Der
+    /// Platzhalter wird `PERSON_3B` statt eines eigenen Eintrags — damit
+    /// bleibt beim Lesen der KI-Antwort klar, dass beides dieselbe Person ist.
+    @discardableResult
+    public static func markiereAlsSchreibweise(
+        bereich: NSRange,
+        zu eintragId: UUID,
+        in analyse: inout Analyse
+    ) -> UUID? {
+        let nsText = analyse.original as NSString
+        let geputzt = bereinige(bereich, in: nsText)
+        guard geputzt.length > 0,
+              analyse.woerterbuch.eintrag(mitId: eintragId) != nil
+        else { return nil }
+
+        let text = nsText.substring(with: geputzt)
+        analyse.funde.removeAll { NSIntersectionRange($0.bereich, geputzt).length > 0 }
+
+        guard let alias = analyse.woerterbuch.aliasHinzufuegen(text, zu: eintragId),
+              let eintrag = analyse.woerterbuch.eintrag(mitId: eintragId)
+        else { return nil }
+
+        var fund = Fund(
+            bereich: geputzt,
+            text: text,
+            kategorie: eintrag.kategorie,
+            sicherheit: .sicher,
+            quelle: .markierung,
+            eintragId: eintrag.id,
+            platzhalter: eintrag.platzhalter(fuer: alias)
+        )
+        fund.bestaetigt = true
+        analyse.funde.append(fund)
+        analyse.funde.sort { $0.bereich.location < $1.bereich.location }
+
+        ergaenzeWeitereVorkommen(
+            eintrag.alleSchreibweisen,
+            kategorie: eintrag.kategorie,
+            eintragId: eintrag.id,
+            quelle: .woerterbuch,
+            in: &analyse
+        )
+        return fund.id
+    }
+
     /// Schneidet Leerzeichen und Satzzeichen an den Rändern weg. Wer mit der
     /// Maus markiert, erwischt fast immer ein Leerzeichen zu viel.
     private static func bereinige(_ bereich: NSRange, in text: NSString) -> NSRange {

@@ -885,4 +885,56 @@ Pruefstand.pruefe("Nachschlagen: früherer Deckname") {
     Pruefstand.falsch(neu?.istFrueherer ?? true, "der heutige Name ist nicht von früher")
 }
 
+Pruefstand.pruefe("Markierung: an bestehenden Eintrag hängen") {
+    let text = "Jan Maia hat zugesagt. Später schrieb Jan  Maia noch einmal."
+    var analyse = Schleuse.analysiere(text, woerterbuch: Woerterbuch())
+    let nsText = text as NSString
+
+    // Erste Nennung als Person merken.
+    guard let erste = Schleuse.markiere(
+        bereich: nsText.range(of: "Jan Maia"),
+        als: .person,
+        merken: true,
+        in: &analyse
+    ), let eintrag = analyse.woerterbuch.eintrag(fuerText: "Jan Maia") else {
+        Pruefstand.wahr(false, "erste Nennung gemerkt")
+        return
+    }
+    _ = erste
+
+    // Die zweite Schreibweise mit doppeltem Leerzeichen von Hand zuordnen.
+    let zweite = nsText.range(of: "Jan  Maia")
+    if zweite.location != NSNotFound {
+        Schleuse.markiereAlsSchreibweise(bereich: zweite, zu: eintrag.id, in: &analyse)
+    }
+
+    let geschuetzt = Schleuse.geschuetzterText(analyse)
+    Pruefstand.enthaeltNicht(geschuetzt, "Maia", "keine Nennung bleibt im Klartext")
+    Pruefstand.enthaelt(geschuetzt, "PERSON_1", "die Hauptnennung")
+
+    // Beide zeigen auf denselben Eintrag, damit beim Lesen klar bleibt, dass
+    // es dieselbe Person ist.
+    let zugeordnet = analyse.aktiveFunde.filter { $0.eintragId == eintrag.id }
+    Pruefstand.gleich(zugeordnet.count, 2, "beide Nennungen hängen am selben Eintrag")
+    Pruefstand.wahr(
+        zugeordnet.allSatisfy { $0.platzhalter.hasPrefix("PERSON_1") },
+        "und tragen denselben Stamm im Decknamen"
+    )
+
+    let zurueck = Rueckweg.analysiere(geschuetzt, woerterbuch: analyse.woerterbuch)
+    Pruefstand.gleich(zurueck.ergebnis, text, "der Rückweg stellt beide Schreibweisen her")
+}
+
+Pruefstand.pruefe("Markierung: Zuordnung zu einem Eintrag, den es nicht gibt") {
+    var analyse = Schleuse.analysiere("Jan Maia hat zugesagt.", woerterbuch: Woerterbuch())
+    let vorher = analyse.funde.count
+    let ergebnis = Schleuse.markiereAlsSchreibweise(
+        bereich: NSRange(location: 0, length: 8),
+        zu: UUID(),
+        in: &analyse
+    )
+    Pruefstand.wahr(ergebnis == nil, "wird abgelehnt")
+    Pruefstand.gleich(analyse.funde.count, vorher, "und ändert nichts")
+}
+
 Pruefstand.bilanzUndEnde()

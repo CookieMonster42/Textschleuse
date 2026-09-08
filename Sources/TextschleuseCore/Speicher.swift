@@ -27,6 +27,16 @@ public enum SpeicherFehler: LocalizedError {
 /// keinen Keychain-Zugriff bekommt.
 public protocol Schluesselquelle: Sendable {
     func schluessel() throws -> SymmetricKey
+    /// Alle Schlüssel, die in Frage kommen. Normalerweise genau einer; mehr
+    /// nur, wenn in der Keychain historisch mehrere gelandet sind.
+    func alleSchluessel() throws -> [SymmetricKey]
+    /// Wirft alle bis auf den übergebenen weg.
+    func vereinheitliche(auf schluessel: SymmetricKey) throws
+}
+
+public extension Schluesselquelle {
+    func alleSchluessel() throws -> [SymmetricKey] { [try schluessel()] }
+    func vereinheitliche(auf schluessel: SymmetricKey) throws {}
 }
 
 /// Ein Schlüssel, der im Arbeitsspeicher steht. Nur für Prüfungen — auf der
@@ -66,14 +76,26 @@ public final class Speicher {
     public func laden() throws -> Woerterbuch {
         guard FileManager.default.fileExists(atPath: datei.path) else { return Woerterbuch() }
         let verschluesselt = try Data(contentsOf: datei)
-        let schluessel = try schluesselHolenOderAnlegen()
 
-        let klartext: Data
-        do {
-            let box = try AES.GCM.SealedBox(combined: verschluesselt)
-            klartext = try AES.GCM.open(box, using: schluessel)
-        } catch {
+        // Der Reihe nach alle Schlüssel probieren. Mehr als einer ist ein
+        // Altlastenfall; wer passt, wird danach der einzige.
+        let kandidaten = try schluesselquelle.alleSchluessel()
+        var klartext: Data?
+        var passender: SymmetricKey?
+        for schluessel in kandidaten {
+            guard let box = try? AES.GCM.SealedBox(combined: verschluesselt),
+                  let versuch = try? AES.GCM.open(box, using: schluessel)
+            else { continue }
+            klartext = versuch
+            passender = schluessel
+            break
+        }
+
+        guard let klartext, let passender else {
             throw SpeicherFehler.entschluesselnFehlgeschlagen
+        }
+        if kandidaten.count > 1 {
+            try? schluesselquelle.vereinheitliche(auf: passender)
         }
 
         let buch = try JSONDecoder.textschleuse.decode(Woerterbuch.self, from: klartext)
@@ -150,32 +172,73 @@ public struct KeychainSchluessel: Schluesselquelle {
     public init() {}
 
     public func schluessel() throws -> SymmetricKey {
-        if let vorhanden = try lesen() { return vorhanden }
+        if let vorhanden = try alleSchluessel().first { return vorhanden }
         let neu = SymmetricKey(size: .bits256)
         try schreiben(neu)
         return neu
     }
 
-    private func lesen() throws -> SymmetricKey? {
-        var frage: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Speicher.bundleId,
-            kSecAttrAccount as String: Speicher.schluesselKonto,
-            kSecReturnData as String: true,
-        ]
-        frage[kSecMatchLimit as String] = kSecMatchLimitOne
+    /// Fragt bewusst nach allen Treffern, nicht nach dem ersten.
+    ///
+    /// Eine frühere Fassung löschte vor dem Schreiben mit einem Suchmuster,
+    /// das den Schlüsselwert enthielt — so ein Muster trifft nichts, und der
+    /// Schreibvorgang legte einen zweiten Eintrag an. Mit `kSecMatchLimitOne`
+    /// kam danach ein Fehler statt eines Schlüssels zurück.
+    public func alleSchluessel() throws -> [SymmetricKey] {
+        // Erst die Referenzen holen, dann für jede einzeln die Daten. Der
+        // Datei-Schlüsselbund kann `kSecReturnData` nicht mit
+        // `kSecMatchLimitAll` zusammen — das gibt Status -50.
+        var frage = Self.grundmuster
+        frage[kSecReturnRef as String] = true
+        frage[kSecMatchLimit as String] = kSecMatchLimitAll
 
         var ergebnis: CFTypeRef?
         let status = SecItemCopyMatching(frage as CFDictionary, &ergebnis)
         switch status {
-        case errSecSuccess:
-            guard let daten = ergebnis as? Data else { return nil }
-            return SymmetricKey(data: daten)
         case errSecItemNotFound:
-            return nil
+            return []
+        case errSecSuccess:
+            break
         default:
             throw SpeicherFehler.schluesselNichtLesbar(status)
         }
+
+        let referenzen: [CFTypeRef]
+        if let liste = ergebnis as? [CFTypeRef] {
+            referenzen = liste
+        } else if let einzeln = ergebnis {
+            referenzen = [einzeln]
+        } else {
+            return []
+        }
+
+        return referenzen.compactMap { referenz in
+            var datenFrage: [String: Any] = [
+                kSecValueRef as String: referenz,
+                kSecReturnData as String: true,
+            ]
+            datenFrage[kSecClass as String] = kSecClassGenericPassword
+            var daten: CFTypeRef?
+            guard SecItemCopyMatching(datenFrage as CFDictionary, &daten) == errSecSuccess,
+                  let roh = daten as? Data, roh.count == 32
+            else { return nil }
+            return SymmetricKey(data: roh)
+        }
+    }
+
+    public func vereinheitliche(auf schluessel: SymmetricKey) throws {
+        SecItemDelete(Self.grundmuster as CFDictionary)
+        try schreiben(schluessel)
+    }
+
+    /// Das Suchmuster ohne Wert und ohne Zugriffsliste. Beides gehört ins
+    /// Schreiben, nicht ins Suchen — sonst trifft die Suche nichts.
+    private static var grundmuster: [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Speicher.bundleId,
+            kSecAttrAccount as String: Speicher.schluesselKonto,
+        ]
     }
 
     private func schreiben(_ schluessel: SymmetricKey) throws {
@@ -189,7 +252,7 @@ public struct KeychainSchluessel: Schluesselquelle {
         if let zugriff = Self.zugriffOhneRueckfrage() {
             eintrag[kSecAttrAccess as String] = zugriff
         }
-        SecItemDelete(eintrag as CFDictionary)
+        SecItemDelete(Self.grundmuster as CFDictionary)
         let status = SecItemAdd(eintrag as CFDictionary, nil)
         guard status == errSecSuccess else {
             throw SpeicherFehler.schluesselNichtLesbar(status)

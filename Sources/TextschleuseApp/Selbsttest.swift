@@ -30,6 +30,7 @@ enum Selbsttest {
         fehler += pruefeWoerterbuchfenster()
         fehler += pruefeHauptfenster()
         fehler += pruefeBearbeiten()
+        fehler += pruefeSprungZurFundstelle()
 
         print("")
         print(fehler == 0 ? "Alles in Ordnung." : "\(fehler) Punkt(e) fehlgeschlagen.")
@@ -644,6 +645,61 @@ enum Selbsttest {
             print("✗ Leeren: das Wörterbuch wurde mit weggeworfen")
             fehler += 1
         }
+        return fehler
+    }
+
+    /// Klick auf eine Fundstelle in der Liste muss den Text dorthin rollen.
+    private static func pruefeSprungZurFundstelle() -> Int {
+        // Lang genug, dass die letzte Fundstelle außerhalb des Sichtbaren liegt.
+        let fuellung = String(repeating: "Ein Absatz ohne alles Auffällige. ", count: 400)
+        let text = "Herr Nyström schrieb. \(fuellung) Zuletzt meldete sich Almut Weidenbach."
+        let analyse = Schleuse.analysiere(text, woerterbuch: Woerterbuch())
+
+        let ansicht = SchutzAnsicht(analyse: analyse)
+        let fenster = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1000, height: 640),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        fenster.contentView = ansicht
+        fenster.layoutIfNeeded()
+        defer { fenster.orderOut(nil) }
+
+        guard let textAnsicht = rollflaecheSuchen(in: ansicht)?.documentView as? NSTextView,
+              let rolle = rollflaecheSuchen(in: ansicht),
+              let letzte = analyse.aktiveFunde.last
+        else {
+            print("✗ Sprung: Textfläche oder Fundstelle fehlt")
+            return 1
+        }
+
+        // Erst die letzte Fundstelle: sie liegt weit unten und muss nach dem
+        // Anklicken im Ausschnitt stehen.
+        ansicht.waehleFundFuerPruefung(letzte.id)
+        fenster.layoutIfNeeded()
+        let letzteSichtbar = ansicht.fundIstSichtbarFuerPruefung(letzte.id)
+
+        // Dann wieder nach oben: der Sprung muss in beide Richtungen gehen.
+        guard let erste = analyse.aktiveFunde.first else { return 1 }
+        ansicht.waehleFundFuerPruefung(erste.id)
+        fenster.layoutIfNeeded()
+        let ersteSichtbar = ansicht.fundIstSichtbarFuerPruefung(erste.id)
+
+        var fehler = 0
+        if letzteSichtbar {
+            print("✓ Sprung: die letzte Fundstelle steht nach dem Anklicken im Ausschnitt")
+        } else {
+            print("✗ Sprung: die letzte Fundstelle bleibt außerhalb des Ausschnitts")
+            fehler += 1
+        }
+        if ersteSichtbar {
+            print("✓ Sprung: zurück nach oben geht genauso")
+        } else {
+            print("✗ Sprung: der Weg zurück nach oben fehlt")
+            fehler += 1
+        }
+        _ = (rolle, textAnsicht)
         return fehler
     }
 
