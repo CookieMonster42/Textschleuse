@@ -31,6 +31,14 @@ final class SchutzAnsicht: NSView {
     private let liste = Fundstellenliste()
     private lazy var suche = Textsuche(ziel: textAnsicht)
 
+    /// Der Originaltext zum Tippen. Der Chiptext daneben lässt sich nicht
+    /// bearbeiten: darin stehen Platzhalter, die im Original nicht vorkommen,
+    /// und jede Eingabe würde die Zuordnung zerreißen.
+    private let bearbeitung = Textflaeche.bauen()
+    private var imBearbeitungsmodus = false
+    private var bearbeitenKnopf = NSButton()
+    private var mitte = NSStackView()
+
     private let knopfleiste = NSStackView()
     private let decknameFeld = NSTextField()
     private let decknameEtikett = NSTextField(labelWithString: "Deckname")
@@ -52,6 +60,8 @@ final class SchutzAnsicht: NSView {
     func setze(analyse neue: Analyse) {
         analyse = neue
         auswahl = 0
+        imBearbeitungsmodus = false
+        zeigeModus()
         textAnsicht.setSelectedRange(NSRange(location: 0, length: 0))
         zeigeMeldung(nil)
         aktualisiere()
@@ -68,6 +78,11 @@ final class SchutzAnsicht: NSView {
 
         textAnsicht.delegate = self
         textAnsicht.tastenweiche = { [weak self] ereignis in
+            self?.verarbeite(ereignis) ?? false
+        }
+        // Auch beim Tippen am Original muss ⌘E ankommen, sonst käme man aus
+        // dem Bearbeitungsmodus nur noch mit der Maus heraus.
+        bearbeitung.text.tastenweiche = { [weak self] ereignis in
             self?.verarbeite(ereignis) ?? false
         }
 
@@ -108,10 +123,17 @@ final class SchutzAnsicht: NSView {
         fusszeile.textColor = .secondaryLabelColor
         fusszeile.stringValue = "1–5 Kategorie, dann Deckname tippen und ⏎ · ⏎ im Text Kopieren · "
             + "⌘⏎ Kopieren und alles merken · ↑ ↓ Fundstelle · ⌫ Verwerfen · G Zur Gruppe · "
-            + "⌘F Suchen · ⌘N Neuer Text · ⎋ Abbrechen"
+            + "⌘E Text bearbeiten · ⌘F Suchen · ⌘N Neuer Text · ⎋ Abbrechen"
 
-        // Text und Liste nebeneinander.
-        let mitte = NSStackView(views: [rollflaeche, liste])
+        bearbeitung.text.isEditable = true
+        bearbeitung.text.font = .systemFont(ofSize: 13)
+        bearbeitung.text.isRichText = false
+        bearbeitung.text.allowsUndo = true
+        bearbeitung.rolle.isHidden = true
+
+        // Text und Liste nebeneinander, die Bearbeitungsfläche liegt an der
+        // Stelle des Chiptexts und ist normalerweise ausgeblendet.
+        mitte = NSStackView(views: [rollflaeche, bearbeitung.rolle, liste])
         mitte.orientation = .horizontal
         mitte.spacing = 12
         mitte.distribution = .fill
@@ -153,6 +175,7 @@ final class SchutzAnsicht: NSView {
             mitte.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
             mitte.heightAnchor.constraint(greaterThanOrEqualToConstant: 260),
             liste.widthAnchor.constraint(equalToConstant: 260),
+            bearbeitung.rolle.widthAnchor.constraint(equalTo: rollflaeche.widthAnchor),
             decknameZeile.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
             suche.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
             decknameFeld.widthAnchor.constraint(greaterThanOrEqualToConstant: 180),
@@ -180,7 +203,11 @@ final class SchutzAnsicht: NSView {
         gruppe.toolTip = "Taste G macht dasselbe"
         let neu = NSButton(title: "Neuer Text (⌘N)", target: self, action: #selector(neuEinlesen))
         neu.toolTip = "Liest, was jetzt in der Zwischenablage liegt. Der bisherige Text wird verworfen."
-        for knopf in [verwerfen, gruppe, neu] {
+        bearbeitenKnopf = NSButton(title: "Text bearbeiten (⌘E)", target: self, action: #selector(bearbeitenUmschalten))
+        bearbeitenKnopf.toolTip = "Am Originaltext tippen. Danach wird neu geprüft."
+        let leeren = NSButton(title: "Leeren", target: self, action: #selector(leeren))
+        leeren.toolTip = "Wirft den Text weg. Das Wörterbuch bleibt."
+        for knopf in [verwerfen, gruppe, bearbeitenKnopf, leeren, neu] {
             knopf.bezelStyle = .rounded
             knopf.controlSize = .small
             knopfleiste.addArrangedSubview(knopf)
@@ -201,7 +228,7 @@ final class SchutzAnsicht: NSView {
         bereiche = aufbau.bereiche
         textAnsicht.textStorage?.setAttributedString(aufbau.text)
 
-        beschrifteKopf()
+        if !imBearbeitungsmodus { beschrifteKopf() }
 
         liste.zeige(
             analyse.funde.sorted { $0.bereich.location < $1.bereich.location }.map(listenzeile),
@@ -278,6 +305,7 @@ final class SchutzAnsicht: NSView {
     }
 
     private func aktualisiereWerkzeuge() {
+        guard !imBearbeitungsmodus else { return }
         let fund = aktuellerFund
         for ansicht in knopfleiste.arrangedSubviews {
             guard let knopf = ansicht as? NSButton else { continue }
@@ -336,13 +364,32 @@ final class SchutzAnsicht: NSView {
             return false
         }
 
+        // Beim Tippen am Originaltext auch: sonst legt die 1 eine Person an,
+        // statt eine Eins zu schreiben. Nur ⌘E und ⎋ kommen durch.
+        if imBearbeitungsmodus {
+            let zusatz = ereignis.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if zusatz.contains(.command), ereignis.charactersIgnoringModifiers?.lowercased() == "e" {
+                bearbeitenUmschalten()
+                return true
+            }
+            if ereignis.keyCode == 53 {
+                bearbeitenUmschalten()
+                return true
+            }
+            return false
+        }
+
         let zusatz = ereignis.modifierFlags.intersection(.deviceIndependentFlagsMask)
         if zusatz.contains(.command) {
             switch ereignis.charactersIgnoringModifiers?.lowercased() {
             case "n":
                 neuEinlesen()
                 return true
+            case "e":
+                bearbeitenUmschalten()
+                return true
             case "f":
+                guard !imBearbeitungsmodus else { return false }
                 suche.oeffne()
                 return true
             case "g":
@@ -487,6 +534,70 @@ final class SchutzAnsicht: NSView {
         guard let fund = aktuellerFund else { return }
         Schleuse.verwerfe(fundId: fund.id, in: &analyse)
         aktualisiere()
+    }
+
+    // MARK: Für den Selbsttest
+
+    func bearbeitenUmschaltenFuerPruefung() { bearbeitenUmschalten() }
+    func leerenFuerPruefung() { leeren() }
+    func setzeBearbeitungstextFuerPruefung(_ text: String) { bearbeitung.text.string = text }
+
+    // MARK: Bearbeiten
+
+    /// Schaltet zwischen Chiptext und Originaltext um. Beim Zurückschalten
+    /// wird neu geprüft; das Wörterbuch bleibt, was schon gemerkt ist, greift
+    /// also sofort wieder.
+    @objc private func bearbeitenUmschalten() {
+        if imBearbeitungsmodus {
+            let getippt = bearbeitung.text.string
+            imBearbeitungsmodus = false
+            analyse = Schleuse.analysiere(getippt, woerterbuch: analyse.woerterbuch)
+            auswahl = 0
+            zeigeModus()
+            aktualisiere()
+            window?.makeFirstResponder(textAnsicht)
+        } else {
+            bearbeitung.text.string = analyse.original
+            imBearbeitungsmodus = true
+            zeigeModus()
+            window?.makeFirstResponder(bearbeitung.text)
+            zeigeMeldung(nil)
+        }
+    }
+
+    /// Wirft den Text weg und lässt dich gleich tippen. Ohne das müsste man
+    /// erst irgendwas anderes kopieren, um den alten Text loszuwerden.
+    @objc private func leeren() {
+        analyse = Schleuse.analysiere("", woerterbuch: analyse.woerterbuch)
+        auswahl = 0
+        bearbeitung.text.string = ""
+        imBearbeitungsmodus = true
+        zeigeModus()
+        aktualisiere()
+        window?.makeFirstResponder(bearbeitung.text)
+    }
+
+    private func zeigeModus() {
+        rollflaeche.isHidden = imBearbeitungsmodus
+        bearbeitung.rolle.isHidden = !imBearbeitungsmodus
+        liste.isHidden = imBearbeitungsmodus
+        suche.isHidden = true
+        bearbeitenKnopf.title = imBearbeitungsmodus ? "Fertig, prüfen (⌘E)" : "Text bearbeiten (⌘E)"
+
+        for ansicht in knopfleiste.arrangedSubviews {
+            guard let knopf = ansicht as? NSButton, knopf !== bearbeitenKnopf else { continue }
+            // Beim Tippen gibt es keine Fundstelle, auf die sich etwas
+            // beziehen könnte.
+            if !knopf.title.hasPrefix("Leeren"), !knopf.title.hasPrefix("Neuer Text") {
+                knopf.isEnabled = !imBearbeitungsmodus
+            }
+        }
+        decknameFeld.isEnabled = !imBearbeitungsmodus && decknameFeld.isEnabled
+
+        if imBearbeitungsmodus {
+            kopfzeile.stringValue = "Originaltext bearbeiten"
+            regelzeile.stringValue = "Tippe, füge ein oder lösche. ⌘E prüft den Text danach neu."
+        }
     }
 
     /// Holt sich, was jetzt in der Zwischenablage liegt, und fängt damit von
