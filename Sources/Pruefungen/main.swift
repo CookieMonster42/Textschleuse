@@ -847,4 +847,42 @@ Pruefstand.pruefe("Bearbeiten: Schreibweise zur Hauptnennung machen") {
     Pruefstand.gleich(buch.klartext(fuerPlatzhalter: "PERSON_1B"), "Nyström", "die Kurzform ist jetzt die Schreibweise")
 }
 
+Pruefstand.pruefe("Nachschlagen: wer war nochmal PERSON_1") {
+    var buch = Woerterbuch()
+    let eintrag = buch.anlegen(text: "Thorben Nyström", kategorie: .person)
+    _ = buch.aliasHinzufuegen("Nyström", zu: eintrag.id)
+
+    let haupt = buch.aufloesen("PERSON_1")
+    Pruefstand.gleich(haupt?.klartext, "Thorben Nyström", "Hauptnennung")
+    Pruefstand.wahr(haupt?.alias == nil, "und zwar als Hauptnennung, nicht als Schreibweise")
+    Pruefstand.falsch(haupt?.istFrueherer ?? true, "der Name ist aktuell")
+
+    let schreibweise = buch.aufloesen("person_1b")
+    Pruefstand.gleich(schreibweise?.klartext, "Nyström", "Schreibweise, Kleinschreibung egal")
+    Pruefstand.gleich(schreibweise?.eintrag.text, "Thorben Nyström", "mit Verweis auf die Hauptnennung")
+
+    Pruefstand.gleich(buch.aufloesen("PERSON 1")?.klartext, "Thorben Nyström",
+                      "auch mit Leerzeichen statt Unterstrich")
+    Pruefstand.wahr(buch.aufloesen("PERSON_9") == nil, "was es nicht gibt, gibt es nicht")
+    Pruefstand.wahr(buch.aufloesen("  ") == nil, "leere Eingabe liefert nichts")
+}
+
+Pruefstand.pruefe("Nachschlagen: früherer Deckname") {
+    var buch = Woerterbuch()
+    let eintrag = buch.anlegen(text: "Thorben Nyström", kategorie: .person)
+    _ = buch.aliasHinzufuegen("Nyström", zu: eintrag.id)
+    _ = try? buch.umbenennen(eintrag.id, auf: "MANDANT_A")
+
+    let alt = buch.aufloesen("PERSON_1")
+    Pruefstand.gleich(alt?.klartext, "Thorben Nyström", "der alte Name löst weiter auf")
+    Pruefstand.wahr(alt?.istFrueherer ?? false, "und wird als früherer gekennzeichnet")
+    Pruefstand.gleich(alt?.eintrag.platzhalter, "MANDANT_A", "mit dem heutigen Namen dabei")
+
+    let alteSchreibweise = buch.aufloesen("PERSON_1B")
+    Pruefstand.gleich(alteSchreibweise?.klartext, "Nyström", "auch die Schreibweise unter dem alten Namen")
+
+    let neu = buch.aufloesen("MANDANT_A")
+    Pruefstand.falsch(neu?.istFrueherer ?? true, "der heutige Name ist nicht von früher")
+}
+
 Pruefstand.bilanzUndEnde()

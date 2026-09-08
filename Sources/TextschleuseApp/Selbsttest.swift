@@ -197,7 +197,7 @@ enum Selbsttest {
     }
 
     private static func beschriftungenSammeln(in ansicht: NSView?) -> [String] {
-        guard let ansicht else { return [] }
+        guard let ansicht, !ansicht.isHidden else { return [] }
         var gefunden: [String] = []
         if let feld = ansicht as? NSTextField, !feld.isEditable, !feld.stringValue.isEmpty {
             gefunden.append(feld.stringValue)
@@ -474,6 +474,35 @@ enum Selbsttest {
             fehler += 1
         }
 
+        // Nachschlagen: tippt man einen Decknamen ins Suchfeld, muss die
+        // Antwort dastehen.
+        if let feld = suchfeldSuchen(in: inhalt) {
+            feld.stringValue = "PERSON_1"
+            fenster.filterGeaendert()
+            let saetze = beschriftungenSammeln(in: inhalt)
+            if saetze.contains(where: { $0.contains("PERSON_1 ist Thorben Nyström") }) {
+                print("✓ Wörterbuch: Deckname nachschlagen zeigt den Klartext")
+            } else {
+                print("✗ Wörterbuch: die Auflösungszeile fehlt")
+                fehler += 1
+            }
+
+            feld.stringValue = "GIBTESNICHT"
+            fenster.filterGeaendert()
+            let danach = beschriftungenSammeln(in: inhalt)
+            if !danach.contains(where: { $0.contains(" ist ") && $0.contains("Nyström") }) {
+                print("✓ Wörterbuch: ohne Treffer bleibt die Zeile weg")
+            } else {
+                print("✗ Wörterbuch: die Auflösungszeile steht ohne Treffer da")
+                fehler += 1
+            }
+            feld.stringValue = ""
+            fenster.filterGeaendert()
+        } else {
+            print("✗ Wörterbuch: das Suchfeld fehlt")
+            fehler += 1
+        }
+
         // Alte Decknamen müssen weiter auflösen.
         if gesichert?.klartext(fuerPlatzhalter: "PERSON_1") == "Thorben Nyström" {
             print("✓ Wörterbuch: der ursprüngliche Deckname löst weiter auf")
@@ -482,6 +511,14 @@ enum Selbsttest {
             fehler += 1
         }
         return fehler
+    }
+
+    private static func suchfeldSuchen(in ansicht: NSView) -> NSSearchField? {
+        if let treffer = ansicht as? NSSearchField { return treffer }
+        for unter in ansicht.subviews {
+            if let treffer = suchfeldSuchen(in: unter) { return treffer }
+        }
+        return nil
     }
 
     private static func editorSuchen(in ansicht: NSView) -> EintragEditor? {
