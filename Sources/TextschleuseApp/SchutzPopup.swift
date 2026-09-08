@@ -23,8 +23,9 @@ final class SchutzPopup: TastaturPanel {
 
     private let kopfzeile = NSTextField(labelWithString: "")
     private let regelzeile = NSTextField(labelWithString: "")
-    private let textAnsicht = NSTextView()
-    private let rollflaeche = NSScrollView()
+    private let flaeche = Textflaeche.bauen()
+    private var textAnsicht: NSTextView { flaeche.text }
+    private var rollflaeche: NSScrollView { flaeche.rolle }
     private let knopfleiste = NSStackView()
     private let fusszeile = NSTextField(labelWithString: "")
 
@@ -48,20 +49,7 @@ final class SchutzPopup: TastaturPanel {
         regelzeile.textColor = .secondaryLabelColor
         regelzeile.lineBreakMode = .byTruncatingTail
 
-        textAnsicht.isEditable = false
-        textAnsicht.isSelectable = true
-        textAnsicht.drawsBackground = false
-        textAnsicht.textContainerInset = NSSize(width: 10, height: 10)
         textAnsicht.delegate = self
-        textAnsicht.linkTextAttributes = [:]
-        textAnsicht.isAutomaticLinkDetectionEnabled = false
-
-        rollflaeche.documentView = textAnsicht
-        rollflaeche.hasVerticalScroller = true
-        rollflaeche.drawsBackground = true
-        rollflaeche.borderType = .noBorder
-        rollflaeche.wantsLayer = true
-        rollflaeche.layer?.cornerRadius = 8
 
         knopfleiste.orientation = .horizontal
         knopfleiste.spacing = 6
@@ -76,20 +64,28 @@ final class SchutzPopup: TastaturPanel {
         stapel.orientation = .vertical
         stapel.spacing = 10
         stapel.alignment = .leading
-        stapel.edgeInsets = NSEdgeInsets(top: 16, left: 18, bottom: 16, right: 18)
-        stapel.setHuggingPriority(.defaultLow, for: .vertical)
+        stapel.edgeInsets = NSEdgeInsets(top: 28, left: 18, bottom: 16, right: 18)
 
+        // Die Stapelansicht bleibt die `contentView` des Fensters und behält
+        // deshalb ihr Autoresizing. Koppelt man sie davon ab, hat sie keine
+        // Verankerung mehr und schrumpft auf ihre Mindestgröße in die linke
+        // untere Ecke.
         contentView = stapel
-        stapel.translatesAutoresizingMaskIntoConstraints = false
-        if let inhalt = contentView {
-            NSLayoutConstraint.activate([
-                rollflaeche.leadingAnchor.constraint(equalTo: stapel.leadingAnchor, constant: 18),
-                rollflaeche.trailingAnchor.constraint(equalTo: stapel.trailingAnchor, constant: -18),
-                kopfzeile.leadingAnchor.constraint(equalTo: stapel.leadingAnchor, constant: 18),
-                regelzeile.leadingAnchor.constraint(equalTo: stapel.leadingAnchor, constant: 18),
-                inhalt.widthAnchor.constraint(greaterThanOrEqualToConstant: 640),
-            ])
+
+        // Von allen Zeilen soll nur die Textfläche wachsen.
+        for zeile in [kopfzeile, regelzeile, fusszeile] {
+            zeile.setContentHuggingPriority(.required, for: .vertical)
         }
+        knopfleiste.setContentHuggingPriority(.required, for: .vertical)
+        rollflaeche.setContentHuggingPriority(.defaultLow, for: .vertical)
+        rollflaeche.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+
+        NSLayoutConstraint.activate([
+            // Über die Breite zieht sich die Textfläche selbst auf; die
+            // Randabstände stecken schon in den edgeInsets.
+            rollflaeche.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
+            rollflaeche.heightAnchor.constraint(greaterThanOrEqualToConstant: 180),
+        ])
     }
 
     private func baueKnoepfe() {
