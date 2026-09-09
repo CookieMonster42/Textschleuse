@@ -38,6 +38,7 @@ enum Selbsttest {
         fehler += pruefeZuordnenImRueckweg()
         fehler += pruefeKnoepfeUndMenue()
         fehler += pruefePfeiltasten()
+        fehler += pruefeWoerterbuchDaneben()
 
         print("")
         print(fehler == 0 ? "Alles in Ordnung." : "\(fehler) Punkt(e) fehlgeschlagen.")
@@ -390,18 +391,20 @@ enum Selbsttest {
         _ = buch.anlegen(text: "beispiel@example.org", kategorie: .email, automatischErkannt: true)
 
         var gesichert: Woerterbuch?
-        let fenster = WoerterbuchFenster(
+        let inhalt = WoerterbuchAnsicht(
             woerterbuch: buch,
             beimSichern: { gesichert = $0 },
             beimExportieren: { _, _ in }
         )
-        fenster.window?.layoutIfNeeded()
-        defer { fenster.close() }
-
-        guard let inhalt = fenster.window?.contentView else {
-            print("✗ Wörterbuch: das Fenster hat keinen Inhalt")
-            return 1
-        }
+        let fenster = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 980, height: 560),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        fenster.contentView = inhalt
+        fenster.layoutIfNeeded()
+        defer { fenster.orderOut(nil) }
 
         var fehler = 0
 
@@ -428,7 +431,7 @@ enum Selbsttest {
         }
 
         // Jetzt den Eintrag auswählen und den Tippfehler beheben.
-        fenster.waehle(person.id)
+        inhalt.waehle(person.id)
         if let meldung = editor.beiBefehl?(.begriff("Thorben Nyström")) {
             print("✗ Wörterbuch: Begriff ändern meldet „\(meldung)\"")
             fehler += 1
@@ -488,7 +491,7 @@ enum Selbsttest {
         // Antwort dastehen.
         if let feld = suchfeldSuchen(in: inhalt) {
             feld.stringValue = "PERSON_1"
-            fenster.filterGeaendert()
+            inhalt.filterGeaendert()
             let saetze = beschriftungenSammeln(in: inhalt)
             if saetze.contains(where: { $0.contains("PERSON_1 ist Thorben Nyström") }) {
                 print("✓ Wörterbuch: Deckname nachschlagen zeigt den Klartext")
@@ -498,7 +501,7 @@ enum Selbsttest {
             }
 
             feld.stringValue = "GIBTESNICHT"
-            fenster.filterGeaendert()
+            inhalt.filterGeaendert()
             let danach = beschriftungenSammeln(in: inhalt)
             if !danach.contains(where: { $0.contains(" ist ") && $0.contains("Nyström") }) {
                 print("✓ Wörterbuch: ohne Treffer bleibt die Zeile weg")
@@ -507,7 +510,7 @@ enum Selbsttest {
                 fehler += 1
             }
             feld.stringValue = ""
-            fenster.filterGeaendert()
+            inhalt.filterGeaendert()
         } else {
             print("✗ Wörterbuch: das Suchfeld fehlt")
             fehler += 1
@@ -1190,6 +1193,79 @@ enum Selbsttest {
             fehler += 1
         }
         return fehler
+    }
+
+    /// Das Wörterbuch neben dem Text: im Hauptfenster fest, im Popup
+    /// ausklappbar. Und was dort gemerkt wird, muss im Text sofort greifen.
+    private static func pruefeWoerterbuchDaneben() -> Int {
+        var fehler = 0
+        let text = "Herr Nyström rief an."
+
+        // Popup: zu, bis man aufklappt.
+        let popupAnsicht = SchutzAnsicht(analyse: Schleuse.analysiere(text, woerterbuch: Woerterbuch()))
+        let fenster = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1420, height: 760),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        fenster.contentView = popupAnsicht
+        fenster.layoutIfNeeded()
+        defer { fenster.orderOut(nil) }
+
+        if woerterbuchSuchen(in: popupAnsicht) == nil {
+            print("✓ Wörterbuch daneben: im Popup zunächst zugeklappt")
+        } else {
+            print("✗ Wörterbuch daneben: im Popup schon offen")
+            fehler += 1
+        }
+
+        popupAnsicht.klappeUmschalten()
+        fenster.layoutIfNeeded()
+        if woerterbuchSuchen(in: popupAnsicht) != nil {
+            print("✓ Wörterbuch daneben: der Knopf klappt es auf")
+        } else {
+            print("✗ Wörterbuch daneben: der Knopf klappt nichts auf")
+            fehler += 1
+        }
+
+        popupAnsicht.klappeUmschalten()
+        fenster.layoutIfNeeded()
+        if woerterbuchSuchen(in: popupAnsicht) == nil {
+            print("✓ Wörterbuch daneben: und wieder zu")
+        } else {
+            print("✗ Wörterbuch daneben: es bleibt offen")
+            fehler += 1
+        }
+
+        // Hauptfenster: von Anfang an dran, ohne Knopf zum Zuklappen.
+        let sitzung = Sitzung()
+        sitzung.beginne(Schleuse.analysiere(text, woerterbuch: Woerterbuch()))
+        let haupt = Hauptfenster(
+            woerterbuch: { Woerterbuch() },
+            sitzung: sitzung,
+            beimSchuetzen: { _, _ in },
+            beimZurueckdrehen: { _ in }
+        )
+        haupt.window?.layoutIfNeeded()
+        defer { haupt.close() }
+
+        let imHauptfenster = haupt.window?.contentView.flatMap { woerterbuchSuchen(in: $0) }
+        if imHauptfenster != nil {
+            print("✓ Wörterbuch daneben: im Hauptfenster von Anfang an sichtbar")
+        } else {
+            print("✗ Wörterbuch daneben: im Hauptfenster fehlt es")
+            fehler += 1
+        }
+        return fehler
+    }
+
+    private static func woerterbuchSuchen(in ansicht: NSView) -> WoerterbuchAnsicht? {
+        if let treffer = ansicht as? WoerterbuchAnsicht { return treffer }
+        for unter in ansicht.subviews {
+            if let treffer = woerterbuchSuchen(in: unter) { return treffer }
+        }
+        return nil
     }
 
     private static func knoepfeSammeln(in ansicht: NSView) -> [NSButton] {

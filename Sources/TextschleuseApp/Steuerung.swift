@@ -298,6 +298,12 @@ final class Steuerung: NSObject, NSApplicationDelegate {
 
         menue.addItem(.separator())
         menue.addItem(withTitle: "Im Text suchen", action: Selector(("aktionSuchen:")), keyEquivalent: "f")
+        let klappe = menue.addItem(
+            withTitle: "Wörterbuch neben dem Text",
+            action: Selector(("aktionWoerterbuchKlappe:")),
+            keyEquivalent: "d"
+        )
+        klappe.keyEquivalentModifierMask = [.command, .option]
         menue.addItem(
             withTitle: "Decknamen im Text ein- und ausblenden",
             action: Selector(("aktionDecknamenUmschalten:")),
