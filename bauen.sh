@@ -18,10 +18,18 @@ swift run --configuration "$KONFIGURATION" Pruefungen
 echo "→ Übersetzen"
 swift build --configuration "$KONFIGURATION" --product Textschleuse
 
+echo "→ Symbol"
+if [[ ! -f ".build/Textschleuse.icns" ]] || [[ Werkzeug/Logo.swift -nt ".build/Textschleuse.icns" ]]; then
+    swift Werkzeug/Logo.swift ".build/Textschleuse.icns" | sed 's/^/   /'
+else
+    echo "   unverändert"
+fi
+
 echo "→ Bundle bauen"
 rm -rf "$BUNDLE"
 mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources"
 cp ".build/$KONFIGURATION/Textschleuse" "$BUNDLE/Contents/MacOS/Textschleuse"
+cp ".build/Textschleuse.icns" "$BUNDLE/Contents/Resources/Textschleuse.icns"
 
 cat > "$BUNDLE/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -32,6 +40,7 @@ cat > "$BUNDLE/Contents/Info.plist" <<PLIST
     <key>CFBundleDisplayName</key>       <string>Textschleuse</string>
     <key>CFBundleIdentifier</key>        <string>$BUNDLE_ID</string>
     <key>CFBundleExecutable</key>        <string>Textschleuse</string>
+    <key>CFBundleIconFile</key>          <string>Textschleuse</string>
     <key>CFBundlePackageType</key>       <string>APPL</string>
     <key>CFBundleShortVersionString</key><string>$VERSION</string>
     <key>CFBundleVersion</key>           <string>$VERSION</string>
@@ -101,10 +110,15 @@ HINWEIS
     echo "   $PWD/.build/Textschleuse-$VERSION.dmg"
     echo "   $(du -h ".build/Textschleuse-$VERSION.dmg" | cut -f1)"
 elif [[ "${1:-}" == "--install" ]]; then
-    echo "→ Nach /Applications kopieren"
-    rm -rf "/Applications/Textschleuse.app"
-    cp -R "$BUNDLE" "/Applications/Textschleuse.app"
-    echo "   /Applications/Textschleuse.app"
+    # ~/Applications statt /Applications: dort braucht es keine
+    # Administratorrechte, und Launchpad und Spotlight finden es genauso.
+    # Wer es systemweit will, kopiert von Hand mit sudo.
+    ZIEL="$HOME/Applications"
+    mkdir -p "$ZIEL"
+    echo "→ Nach $ZIEL kopieren"
+    rm -rf "$ZIEL/Textschleuse.app"
+    cp -R "$BUNDLE" "$ZIEL/Textschleuse.app"
+    echo "   $ZIEL/Textschleuse.app"
 else
     echo "   $PWD/$BUNDLE"
 fi

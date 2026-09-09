@@ -59,6 +59,9 @@ final class Steuerung: NSObject, NSApplicationDelegate {
     }
 
     private func baueMenueleiste() {
+        // Ein altes Symbol vorher wegräumen: sonst steht nach dem Ändern
+        // eines Kurzbefehls ein zweites in der Menüleiste.
+        if let altes = statusSymbol { NSStatusBar.system.removeStatusItem(altes) }
         let symbol = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         symbol.button?.image = Menuesymbol.zeichnen()
         symbol.button?.image?.isTemplate = true
@@ -475,41 +478,21 @@ final class Steuerung: NSObject, NSApplicationDelegate {
     }
 
     @objc func zeigeEinstellungen() {
-        NSApp.activate(ignoringOtherApps: true)
-        let einstellungen = Einstellungen.gemeinsam
+        EinstellungenFenster.zeige(
+            beiKurzbefehlen: { [weak self] in self?.meldeKurzbefehleNeuAn() },
+            beiDarstellung: { [weak self] nurLeiste in
+                NSApp.setActivationPolicy(nurLeiste ? .accessory : .regular)
+                if !nurLeiste { self?.zeigeHauptfenster() }
+            }
+        )
+    }
 
-        let nurLeiste = NSButton(checkboxWithTitle: "Nur in der Menüleiste, kein Dock-Symbol", target: nil, action: nil)
-        nurLeiste.state = einstellungen.nurMenueleiste ? .on : .off
-        let hinweise = NSButton(checkboxWithTitle: "KI-Hinweis mitkopieren", target: nil, action: nil)
-        hinweise.state = einstellungen.hinweiseMitkopieren ? .on : .off
-        hinweise.toolTip = "Ein paar Zeilen vor dem Text mit der Bitte, die Platzhalter stehen zu lassen."
-
-        let stapel = NSStackView(views: [nurLeiste, hinweise])
-        stapel.orientation = .vertical
-        stapel.alignment = .leading
-        stapel.spacing = 6
-        stapel.frame = NSRect(x: 0, y: 0, width: 340, height: 50)
-
-        let meldung = NSAlert()
-        meldung.messageText = "Einstellungen"
-        meldung.informativeText = """
-            Kurzbefehle: \(einstellungen.kurzbefehlSchuetzen.beschriftung) zum Schützen, \
-            \(einstellungen.kurzbefehlRueckweg.beschriftung) zum Zurückdrehen. Sie lassen sich \
-            in dieser Ausbaustufe noch nicht ändern.
-
-            Das Popup öffnet sich \(einstellungen.popupPosition.anzeigename.lowercased()).
-            """
-        meldung.accessoryView = stapel
-        meldung.addButton(withTitle: "Übernehmen")
-        meldung.addButton(withTitle: "Abbrechen")
-        guard meldung.runModal() == .alertFirstButtonReturn else { return }
-
-        einstellungen.hinweiseMitkopieren = hinweise.state == .on
-        let neuNurLeiste = nurLeiste.state == .on
-        guard neuNurLeiste != einstellungen.nurMenueleiste else { return }
-        einstellungen.nurMenueleiste = neuNurLeiste
-        NSApp.setActivationPolicy(neuNurLeiste ? .accessory : .regular)
-        if !neuNurLeiste { zeigeHauptfenster() }
+    /// Nach einer Änderung in den Einstellungen: alte Anmeldungen weg, neue
+    /// hin. Ohne das Abmelden bliebe die alte Kombination aktiv.
+    private func meldeKurzbefehleNeuAn() {
+        Kurzbefehle.gemeinsam.entferneAlle()
+        meldeKurzbefehleAn()
+        baueMenueleiste()
     }
 
     // MARK: Backup
