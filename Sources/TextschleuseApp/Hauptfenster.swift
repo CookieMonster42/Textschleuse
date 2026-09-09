@@ -82,7 +82,7 @@ final class Hauptfenster: NSWindowController {
         self.beimZurueckdrehen = beimZurueckdrehen
 
         let fenster = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1040, height: 700),
+            contentRect: NSRect(x: 0, y: 0, width: 1420, height: 760),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
@@ -207,6 +207,12 @@ final class Hauptfenster: NSWindowController {
                 self.sitzung.aktualisiere(kennung, mit: stand)
                 self.aktualisiereVerlauf()
             }
+            ansicht.beiWoerterbuchAenderung = { [weak self] geaendert in
+                self?.beimWoerterbuch(geaendert)
+            }
+            // Im Hauptfenster hängt das Wörterbuch dauerhaft dran. Hier gibt
+            // es Platz, und die Pflege gehört zum Arbeiten dazu.
+            ansicht.klappeAuf(dauerhaft: true)
             schutzAnsicht = ansicht
         }
         zeige(schutzAnsicht, in: schutzBehaelter, statt: schutzEingabe)

@@ -51,6 +51,17 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
     /// Verlauf auf Text, den es nicht mehr gibt. Ein Stand ist deshalb immer
     /// alles zusammen — Text, Fundstellen und Wörterbuch.
     private let verlauf = UndoManager()
+
+    /// Das kleine Feld, das bei einer Markierung neben der Stelle aufgeht.
+    private var markierungsfeld: MarkierungsPopover?
+
+    /// Das Wörterbuch als Klappe rechts. Im Popup zu, im Hauptfenster von
+    /// außen aufgeklappt und dort auch nicht zuklappbar.
+    private var woerterbuchKlappe: WoerterbuchAnsicht?
+    private var klappeKnopf = NSButton()
+    private var klappeOffen = false
+    /// Läuft, wenn in der Klappe etwas geändert wurde.
+    var beiWoerterbuchAenderung: ((Woerterbuch) -> Void)?
     private var mitte = NSStackView()
 
     private let knopfleiste = NSStackView()
@@ -172,6 +183,11 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
         textAnsicht.allowsUndo = false
         textAnsicht.font = .systemFont(ofSize: 13)
 
+        klappeKnopf = NSButton(title: "Wörterbuch ▸", target: self, action: #selector(klappeUmschalten))
+        klappeKnopf.bezelStyle = .rounded
+        klappeKnopf.controlSize = .small
+        klappeKnopf.toolTip = "Das Wörterbuch neben dem Text aufklappen (⌘⌥D)"
+
         mitte = NSStackView(views: [rollflaeche, liste])
         mitte.orientation = .horizontal
         mitte.spacing = 12
@@ -185,8 +201,13 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
         decknameZeile.spacing = 8
         decknameZeile.translatesAutoresizingMaskIntoConstraints = false
 
+        let kopfzeileMitKlappe = NSStackView(views: [kopfzeile, NSView(), klappeKnopf])
+        kopfzeileMitKlappe.orientation = .horizontal
+        kopfzeileMitKlappe.spacing = 8
+        kopfzeileMitKlappe.translatesAutoresizingMaskIntoConstraints = false
+
         let stapel = NSStackView(views: [
-            kopfzeile, regelzeile, suche, mitte, knopfleiste, decknameZeile, fusszeile,
+            kopfzeileMitKlappe, regelzeile, suche, mitte, knopfleiste, decknameZeile, fusszeile,
         ])
         stapel.orientation = .vertical
         stapel.spacing = 10
@@ -205,6 +226,7 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
         for zeile in [kopfzeile, regelzeile, fusszeile] {
             zeile.setContentHuggingPriority(.required, for: .vertical)
         }
+        kopfzeileMitKlappe.setContentHuggingPriority(.required, for: .vertical)
         for teil in [knopfleiste, decknameZeile, suche] {
             teil.setContentHuggingPriority(.required, for: .vertical)
         }
@@ -218,6 +240,7 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
             mitte.heightAnchor.constraint(greaterThanOrEqualToConstant: 260),
             liste.widthAnchor.constraint(equalToConstant: 260),
             decknameZeile.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
+            kopfzeileMitKlappe.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
             suche.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
             decknameFeld.widthAnchor.constraint(greaterThanOrEqualToConstant: 150),
             originalFeld.widthAnchor.constraint(greaterThanOrEqualToConstant: 170),
@@ -312,6 +335,7 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
         // Der Text ist neu aufgebaut, die alten Trefferbereiche zeigen ins Leere.
         suche.aktualisiere()
         aktualisiereWerkzeuge()
+        klappeNachziehen()
         beiAenderung?(analyse)
     }
 
@@ -455,6 +479,9 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
             case "f":
                 suche.oeffne()
                 return true
+            case "d" where zusatz.contains(.option):
+                klappeUmschalten()
+                return true
             case "g":
                 if zusatz.contains(.shift) { suche.vorheriger() } else { suche.naechster() }
                 return true
@@ -478,6 +505,11 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
         switch ereignis.keyCode {
         case 36, 76 where zusatz.contains(.command):  // ⌘⏎
             uebernehmen(merken: true)
+            return true
+        case 53 where markierungsfeld != nil:  // ⎋ schließt erst das Feld
+            schliesseMarkierungsfeld()
+            textAnsicht.setSelectedRange(NSRange(location: 0, length: 0))
+            aktualisiere()
             return true
         case 53:  // Escape
             abbrechen()
@@ -603,6 +635,7 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
                 zeigeMeldung("Da ist nichts, was sich schützen ließe.")
                 return
             }
+            schliesseMarkierungsfeld()
             textAnsicht.setSelectedRange(NSRange(location: 0, length: 0))
             aktualisiere()
             waehleFund(neue)
@@ -704,6 +737,105 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
         aktualisiere()
     }
 
+    // MARK: Wörterbuch-Klappe
+
+    /// Klappt das Wörterbuch rechts neben der Fundstellenliste auf.
+    ///
+    /// Im Popup ist es zu: dort geht es um einen Text, nicht um Pflege. Im
+    /// Hauptfenster hängt es dauerhaft dran und der Knopf verschwindet.
+    @objc func klappeUmschalten() {
+        klappeOffen ? klappeZu() : klappeAuf()
+    }
+
+    func klappeAuf(dauerhaft: Bool = false) {
+        guard !klappeOffen else { return }
+        let ansicht = WoerterbuchAnsicht(
+            woerterbuch: analyse.woerterbuch,
+            schmal: true,
+            beimSichern: { [weak self] geaendert in
+                guard let self else { return }
+                // Der Text muss nachziehen: was gerade gemerkt wurde, gilt ab
+                // jetzt auch in dieser Analyse.
+                self.analyse.woerterbuch = geaendert
+                self.beiWoerterbuchAenderung?(geaendert)
+                self.aktualisiere()
+            },
+            beimExportieren: { _, _ in }
+        )
+        ansicht.translatesAutoresizingMaskIntoConstraints = false
+        mitte.addArrangedSubview(ansicht)
+        NSLayoutConstraint.activate([
+            ansicht.widthAnchor.constraint(equalToConstant: 340),
+        ])
+        woerterbuchKlappe = ansicht
+        klappeOffen = true
+        klappeKnopf.title = "Wörterbuch ◂"
+        klappeKnopf.isHidden = dauerhaft
+    }
+
+    func klappeZu() {
+        woerterbuchKlappe?.removeFromSuperview()
+        woerterbuchKlappe = nil
+        klappeOffen = false
+        klappeKnopf.title = "Wörterbuch ▸"
+    }
+
+    /// Nach jeder Änderung im Text den Stand in der Klappe nachziehen.
+    private func klappeNachziehen() {
+        woerterbuchKlappe?.setze(woerterbuch: analyse.woerterbuch)
+    }
+
+    // MARK: Feld bei der Markierung
+
+    /// Klappt das kleine Feld neben der markierten Stelle auf.
+    ///
+    /// Es zeigt dasselbe wie die Knopfleiste unten, nur dort, wo man gerade
+    /// hinschaut. Wer die Ziffern schon kennt, braucht es nicht — deshalb
+    /// stehen sie mit auf den Knöpfen.
+    private func zeigeMarkierungsfeld() {
+        guard let bereich = freieMarkierung, markierungsfeld == nil else { return }
+        let text = (analyse.original as NSString).substring(with: bereich)
+
+        let feld = MarkierungsPopover(
+            begriff: text,
+            kannZuordnen: !analyse.woerterbuch.eintraege.isEmpty
+        ) { [weak self] entscheidung in
+            guard let self else { return }
+            self.markierungsfeld = nil
+            switch entscheidung {
+            case .kategorie(let kategorie, let merken):
+                self.merkenHaken.state = merken ? .on : .off
+                self.setzeKategorie(kategorie)
+            case .gehoertZu:
+                self.gruppeUebernehmen()
+            }
+        }
+        markierungsfeld = feld
+        feld.zeige(neben: textAnsicht, bei: rahmenDerMarkierung())
+    }
+
+    private func schliesseMarkierungsfeld() {
+        markierungsfeld?.schliesse()
+        markierungsfeld = nil
+    }
+
+    /// Der Rahmen der Markierung in den Koordinaten der Textansicht. Daran
+    /// hängt das Feld, damit es die Stelle nicht verdeckt.
+    private func rahmenDerMarkierung() -> NSRect {
+        let anzeige = textAnsicht.selectedRange()
+        guard let layout = textAnsicht.layoutManager,
+              let behaelter = textAnsicht.textContainer,
+              anzeige.length > 0
+        else { return NSRect(x: 0, y: 0, width: 1, height: 1) }
+
+        layout.ensureLayout(for: behaelter)
+        let zeichen = layout.glyphRange(forCharacterRange: anzeige, actualCharacterRange: nil)
+        var rahmen = layout.boundingRect(forGlyphRange: zeichen, in: behaelter)
+        rahmen.origin.x += textAnsicht.textContainerOrigin.x
+        rahmen.origin.y += textAnsicht.textContainerOrigin.y
+        return rahmen
+    }
+
     // MARK: Tasten und Menü
 
     /// Ohne das nimmt die Ansicht den Tastaturfokus gar nicht erst an — und
@@ -733,6 +865,7 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
     @objc func aktionNeuerText(_ absender: Any?) { neuEinlesen() }
     @objc func aktionDecknamenUmschalten(_ absender: Any?) { vorschauUmschalten() }
     @objc func aktionSuchen(_ absender: Any?) { suche.oeffne() }
+    @objc func aktionWoerterbuchKlappe(_ absender: Any?) { klappeUmschalten() }
     @objc func aktionNaechsteFundstelle(_ absender: Any?) { waehle(auswahl + 1) }
     @objc func aktionVorigeFundstelle(_ absender: Any?) { waehle(auswahl - 1) }
 
@@ -1115,8 +1248,10 @@ extension SchutzAnsicht: NSTextViewDelegate {
             kopfzeile.stringValue = merkenHaken.state == .on
                 ? "Markierung: Taste 1–5 legt sie als neuen Eintrag an"
                 : "Markierung: Taste 1–5 schützt sie nur in diesem Text"
+            zeigeMarkierungsfeld()
         } else {
             beschrifteKopf()
+            schliesseMarkierungsfeld()
         }
     }
 }
