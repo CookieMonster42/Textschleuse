@@ -1102,4 +1102,46 @@ Pruefstand.pruefe("Rückweg: neuen Eintrag aus einem Platzhalter anlegen") {
     }
 }
 
+Pruefstand.pruefe("Vornamen: Umfang und Abdeckung") {
+    Pruefstand.wahr(Vornamen.alle.count > 3000,
+                    "die Liste hat \(Vornamen.alle.count) Namen")
+
+    // Was die alte, von Hand gepflegte Liste konnte, muss sie weiter können.
+    for name in ["Ilse", "Almut", "Anna", "Bernd", "Thorben", "Ursula", "Wolfgang"] {
+        Pruefstand.wahr(Vornamen.kenntVorname(name), "\(name) ist bekannt")
+    }
+
+    // Und das, wofür Berlin als Quelle gewählt wurde.
+    let international = ["Ayse", "Mohammed", "Giulia", "Aleksandra", "Yusuf", "Elif", "Dmitri"]
+    let bekannt = international.filter(Vornamen.kenntVorname)
+    Pruefstand.wahr(bekannt.count >= international.count - 1,
+                    "internationale Namen: \(bekannt.count) von \(international.count)")
+
+    // Groß- und Kleinschreibung ist egal.
+    Pruefstand.wahr(Vornamen.kenntVorname("anna"), "kleingeschrieben zählt auch")
+    Pruefstand.wahr(Vornamen.kenntVorname("ANNA"), "großgeschrieben ebenso")
+}
+
+Pruefstand.pruefe("Vornamen: keine Fachwörter") {
+    // Eine große Namensliste ist nur brauchbar, wenn sie nicht bei jedem
+    // zweiten Substantiv anspringt.
+    let fachwoerter = [
+        "Prüfung", "Bericht", "Kredit", "Risiko", "Vorstand", "Konto", "Zinsen",
+        "Antrag", "Vertrag", "Filiale", "Beratung", "Anlage", "Auszug",
+        "Sparkasse", "Guthaben", "Laufzeit", "Tilgung", "Bürgschaft",
+    ]
+    let treffer = fachwoerter.filter(Vornamen.kenntVorname)
+    Pruefstand.wahr(treffer.isEmpty, "keins von \(fachwoerter.count) Fachwörtern gilt als Vorname"
+        + (treffer.isEmpty ? "" : " — es sind: \(treffer.joined(separator: ", "))"))
+
+    let text = """
+        Die Prüfung der Kreditakte ergab keine Beanstandung. Der Vorstand hat die \
+        Anlage genehmigt. Die Beratung erfolgte durch die Filiale Nord im Mai.
+        """
+    let funde = Heuristik.finde(in: text, woerterbuch: Woerterbuch())
+    Pruefstand.gleich(funde.count, 0,
+                      "im Fachtext keine Vermutung"
+                        + (funde.isEmpty ? "" : ": \(funde.map(\.text).joined(separator: ", "))"))
+}
+
 Pruefstand.bilanzUndEnde()
