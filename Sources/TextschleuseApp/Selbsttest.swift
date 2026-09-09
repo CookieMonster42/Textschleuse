@@ -410,7 +410,8 @@ enum Selbsttest {
         var fehler = 0
 
         // Liste: zwei Einträge, einer davon mit Schreibweise, macht drei Zeilen.
-        let tabelle = tabelleSuchen(in: inhalt)
+        // Es gibt zwei Tabellen — „Im Text" und „Alle". Gemeint ist die volle.
+        let tabelle = tabellenSammeln(in: inhalt).max { $0.numberOfRows < $1.numberOfRows }
         if tabelle?.numberOfRows == 3 {
             print("✓ Wörterbuch: 3 Zeilen, Schreibweise eingerückt unter der Hauptnennung")
         } else {
@@ -1269,8 +1270,47 @@ enum Selbsttest {
             print("✗ Wörterbuch daneben: verschwindet mit dem Text")
             fehler += 1
         }
+        // Zwei Listen: was im Text vorkommt, und alles.
+        if let spalte = haupt.window?.contentView.flatMap({ woerterbuchSuchen(in: $0) }) {
+            let tabellen = tabellenSammeln(in: spalte)
+            if tabellen.count >= 2 {
+                print("✓ Wörterbuch daneben: zwei Listen — im Text und alle")
+            } else {
+                print("✗ Wörterbuch daneben: nur \(tabellen.count) Liste")
+                fehler += 1
+            }
+
+            var buch = Woerterbuch()
+            let eintrag = buch.anlegen(text: "Thorben Nyström", kategorie: .person)
+            _ = buch.anlegen(text: "Anna Beispiel", kategorie: .person)
+            spalte.setze(woerterbuch: buch)
+            spalte.setze(imText: [])
+            haupt.window?.layoutIfNeeded()
+            let ohne = tabellenSammeln(in: spalte).map(\.numberOfRows).sorted()
+
+            spalte.setze(imText: [eintrag.id])
+            haupt.window?.layoutIfNeeded()
+            let mit = tabellenSammeln(in: spalte).map(\.numberOfRows).sorted()
+
+            // Drei Tabellen: die beiden Listen und die Schreibweisen im
+            // Editor. Geprüft wird deshalb, dass die erwarteten Zahlen
+            // vorkommen, nicht an welcher Stelle.
+            if ohne.contains(0), ohne.contains(2), mit.contains(1), mit.contains(2) {
+                print("✓ Wörterbuch daneben: links nur was im Text steht, rechts alle")
+            } else {
+                print("✗ Wörterbuch daneben: Zeilen ohne Text \(ohne), mit Text \(mit)")
+                fehler += 1
+            }
+        }
         _ = text
         return fehler
+    }
+
+    private static func tabellenSammeln(in ansicht: NSView) -> [NSTableView] {
+        var gefunden: [NSTableView] = []
+        if let tabelle = ansicht as? NSTableView { gefunden.append(tabelle) }
+        for unter in ansicht.subviews { gefunden += tabellenSammeln(in: unter) }
+        return gefunden
     }
 
     /// Die Einstellungen: nimmt das Kurzbefehlfeld eine Kombination an, und

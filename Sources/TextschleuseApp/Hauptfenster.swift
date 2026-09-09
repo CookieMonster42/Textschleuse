@@ -86,7 +86,7 @@ final class Hauptfenster: NSWindowController {
         self.beimZurueckdrehen = beimZurueckdrehen
 
         let fenster = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1420, height: 760),
+            contentRect: NSRect(x: 0, y: 0, width: 1620, height: 780),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
@@ -188,7 +188,7 @@ final class Hauptfenster: NSWindowController {
             spalte.topAnchor.constraint(equalTo: inhalt.topAnchor, constant: 12),
             spalte.trailingAnchor.constraint(equalTo: inhalt.trailingAnchor, constant: -12),
             spalte.bottomAnchor.constraint(equalTo: inhalt.bottomAnchor, constant: -12),
-            spalte.widthAnchor.constraint(equalToConstant: 360),
+            spalte.widthAnchor.constraint(equalToConstant: 540),
         ])
         window?.contentView = inhalt
     }
@@ -229,6 +229,7 @@ final class Hauptfenster: NSWindowController {
     }
 
     private func zeigeAnalyse(_ analyse: Analyse) {
+        woerterbuchSpalte?.setze(imText: Set(analyse.aktiveFunde.compactMap(\.eintragId)))
         if let vorhanden = schutzAnsicht {
             vorhanden.setze(analyse: analyse)
         } else {
@@ -245,6 +246,7 @@ final class Hauptfenster: NSWindowController {
                 // Wächst das Wörterbuch beim Schützen, zeigt die Spalte es
                 // sofort — nicht erst beim nächsten Öffnen.
                 self.woerterbuchSpalte?.setze(woerterbuch: stand.woerterbuch)
+                self.woerterbuchSpalte?.setze(imText: Set(stand.aktiveFunde.compactMap(\.eintragId)))
             }
             ansicht.beiWoerterbuchAenderung = { [weak self] geaendert in
                 self?.beimWoerterbuch(geaendert)

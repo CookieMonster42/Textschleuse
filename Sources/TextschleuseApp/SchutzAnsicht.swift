@@ -783,7 +783,7 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
         ansicht.translatesAutoresizingMaskIntoConstraints = false
         mitte.addArrangedSubview(ansicht)
         NSLayoutConstraint.activate([
-            ansicht.widthAnchor.constraint(equalToConstant: 340),
+            ansicht.widthAnchor.constraint(equalToConstant: 520),
         ])
         woerterbuchKlappe = ansicht
         klappeOffen = true
@@ -801,6 +801,7 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
     /// Nach jeder Änderung im Text den Stand in der Klappe nachziehen.
     private func klappeNachziehen() {
         woerterbuchKlappe?.setze(woerterbuch: analyse.woerterbuch)
+        woerterbuchKlappe?.setze(imText: Set(analyse.aktiveFunde.compactMap(\.eintragId)))
     }
 
     // MARK: Feld bei der Markierung
