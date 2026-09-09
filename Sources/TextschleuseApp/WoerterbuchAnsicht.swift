@@ -12,7 +12,20 @@ final class WoerterbuchAnsicht: NSView {
     private let beimSichern: (Woerterbuch) -> Void
     private let beimExportieren: (URL, Woerterbuch) throws -> Void
 
+    /// Links: was im gerade bearbeiteten Text vorkommt. Rechts: alles, was
+    /// im Wörterbuch steht.
+    ///
+    /// Die Trennung beantwortet zwei verschiedene Fragen. Beim Arbeiten am
+    /// Text will man wissen, was hier greift; beim Pflegen, was es überhaupt
+    /// gibt. In einer Liste vermischt sich das.
+    private let tabelleImText = NSTableView()
     private let tabelle = NSTableView()
+    private var imText: Set<UUID> = []
+    private var zeilenImText: [Zeile] = []
+    private let ueberschriftImText = NSTextField(labelWithString: "Im Text")
+    private let ueberschriftAlle = NSTextField(labelWithString: "Alle Einträge")
+    private let leerImText = NSTextField(wrappingLabelWithString:
+        "Noch kein Text geprüft.\n\nWas hier greift, steht dann hier.")
     fileprivate let editor = EintragEditor()
     private let zaehler = NSTextField(labelWithString: "")
     private let suchfeld = NSSearchField()
@@ -61,6 +74,14 @@ final class WoerterbuchAnsicht: NSView {
         aktualisiere()
     }
 
+    /// Sagt, welche Einträge im gerade bearbeiteten Text vorkommen. Sie stehen
+    /// dann links, alles andere rechts.
+    func setze(imText kennungen: Set<UUID>) {
+        guard kennungen != imText else { return }
+        imText = kennungen
+        aktualisiere()
+    }
+
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("nicht unterstützt") }
 
@@ -81,11 +102,43 @@ final class WoerterbuchAnsicht: NSView {
         tabelle.usesAlternatingRowBackgroundColors = true
         tabelle.allowsMultipleSelection = true
 
+        // Die linke Tabelle zeigt dieselben Spalten, nur gefiltert.
+        for spalte in tabelle.tableColumns {
+            let kopie = NSTableColumn(identifier: spalte.identifier)
+            kopie.title = spalte.title
+            kopie.width = spalte.width
+            tabelleImText.addTableColumn(kopie)
+        }
+        tabelleImText.dataSource = self
+        tabelleImText.delegate = self
+        tabelleImText.usesAlternatingRowBackgroundColors = true
+
         let rollflaeche = NSScrollView()
         rollflaeche.documentView = tabelle
         rollflaeche.hasVerticalScroller = true
         rollflaeche.borderType = .bezelBorder
         rollflaeche.translatesAutoresizingMaskIntoConstraints = false
+
+        let rolleImText = NSScrollView()
+        rolleImText.documentView = tabelleImText
+        rolleImText.hasVerticalScroller = true
+        rolleImText.borderType = .bezelBorder
+        rolleImText.translatesAutoresizingMaskIntoConstraints = false
+
+        for kopf in [ueberschriftImText, ueberschriftAlle] {
+            kopf.font = .systemFont(ofSize: 11, weight: .semibold)
+            kopf.textColor = .secondaryLabelColor
+        }
+        leerImText.font = .systemFont(ofSize: 11)
+        leerImText.textColor = .tertiaryLabelColor
+        leerImText.alignment = .center
+        leerImText.translatesAutoresizingMaskIntoConstraints = false
+        rolleImText.addSubview(leerImText)
+        NSLayoutConstraint.activate([
+            leerImText.centerXAnchor.constraint(equalTo: rolleImText.centerXAnchor),
+            leerImText.centerYAnchor.constraint(equalTo: rolleImText.centerYAnchor),
+            leerImText.widthAnchor.constraint(equalTo: rolleImText.widthAnchor, constant: -32),
+        ])
 
         editor.translatesAutoresizingMaskIntoConstraints = false
         editor.beiBefehl = { [weak self] befehl in self?.fuehreAus(befehl) }
@@ -124,9 +177,20 @@ final class WoerterbuchAnsicht: NSView {
         aufloesungZeile.font = .systemFont(ofSize: 12)
         aufloesungZeile.isHidden = true
 
-        let links = NSStackView(views: [suchfeld, aufloesungZeile, rollflaeche])
-        links.orientation = .vertical
-        links.spacing = 8
+        let spalteImText = NSStackView(views: [ueberschriftImText, rolleImText])
+        spalteImText.orientation = .vertical
+        spalteImText.spacing = 4
+        spalteImText.translatesAutoresizingMaskIntoConstraints = false
+
+        let spalteAlle = NSStackView(views: [ueberschriftAlle, suchfeld, aufloesungZeile, rollflaeche])
+        spalteAlle.orientation = .vertical
+        spalteAlle.spacing = 4
+        spalteAlle.translatesAutoresizingMaskIntoConstraints = false
+
+        let links = NSStackView(views: [spalteImText, spalteAlle])
+        links.orientation = .horizontal
+        links.spacing = 12
+        links.distribution = .fillEqually
         links.translatesAutoresizingMaskIntoConstraints = false
 
         let mitte = NSStackView(views: [links, editor])
@@ -156,9 +220,12 @@ final class WoerterbuchAnsicht: NSView {
 
         NSLayoutConstraint.activate([
             mitte.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -32),
-            mitte.heightAnchor.constraint(greaterThanOrEqualToConstant: schmal ? 300 : 380),
+            mitte.heightAnchor.constraint(greaterThanOrEqualToConstant: schmal ? 340 : 380),
             knopfleiste.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -32),
-            suchfeld.widthAnchor.constraint(equalTo: links.widthAnchor),
+            suchfeld.widthAnchor.constraint(equalTo: spalteAlle.widthAnchor),
+            rollflaeche.widthAnchor.constraint(equalTo: spalteAlle.widthAnchor),
+            rolleImText.widthAnchor.constraint(equalTo: spalteImText.widthAnchor),
+            aufloesungZeile.widthAnchor.constraint(equalTo: spalteAlle.widthAnchor),
             schmal
                 ? editor.widthAnchor.constraint(equalTo: mitte.widthAnchor)
                 : editor.widthAnchor.constraint(equalToConstant: 340),
@@ -202,6 +269,14 @@ final class WoerterbuchAnsicht: NSView {
                 }
                 return [haupt] + aliase
             }
+
+        zeilenImText = zeilen.filter { imText.contains($0.eintragId) }
+        ueberschriftImText.stringValue = zeilenImText.isEmpty
+            ? "Im Text"
+            : "Im Text (\(Set(zeilenImText.map(\.eintragId)).count))"
+        ueberschriftAlle.stringValue = "Alle Einträge (\(woerterbuch.eintraege.count))"
+        leerImText.isHidden = !zeilenImText.isEmpty
+        tabelleImText.reloadData()
 
         let anzahl = woerterbuch.eintraege.count
         let automatisch = woerterbuch.eintraege.filter(\.automatischErkannt).count
@@ -353,17 +428,20 @@ final class WoerterbuchAnsicht: NSView {
 
 extension WoerterbuchAnsicht: NSTableViewDataSource, NSTableViewDelegate {
 
-    func numberOfRows(in tableView: NSTableView) -> Int { zeilen.count }
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        tableView === tabelleImText ? zeilenImText.count : zeilen.count
+    }
 
     func tableView(
         _ tableView: NSTableView,
         viewFor tableColumn: NSTableColumn?,
         row: Int
     ) -> NSView? {
-        guard let spalte = tableColumn?.identifier.rawValue, zeilen.indices.contains(row) else {
+        let quelle = tableView === tabelleImText ? zeilenImText : zeilen
+        guard let spalte = tableColumn?.identifier.rawValue, quelle.indices.contains(row) else {
             return nil
         }
-        let zeile = zeilen[row]
+        let zeile = quelle[row]
         let inhalt: String
         switch spalte {
         case "text": inhalt = zeile.text
@@ -382,11 +460,14 @@ extension WoerterbuchAnsicht: NSTableViewDataSource, NSTableViewDelegate {
     }
 
     func tableViewSelectionDidChange(_ meldung: Notification) {
-        guard zeilen.indices.contains(tabelle.selectedRow) else {
-            waehle(nil)
-            return
-        }
-        waehle(zeilen[tabelle.selectedRow].eintragId)
+        guard let welche = meldung.object as? NSTableView else { return }
+        let quelle = welche === tabelleImText ? zeilenImText : zeilen
+        guard quelle.indices.contains(welche.selectedRow) else { return }
+        // Die andere Liste die Auswahl fallen lassen, sonst stünden zwei
+        // Zeilen markiert da und man wüsste nicht, welche der Editor zeigt.
+        let andere = welche === tabelleImText ? tabelle : tabelleImText
+        if andere.selectedRow != -1 { andere.deselectAll(nil) }
+        waehle(quelle[welche.selectedRow].eintragId)
     }
 }
 
