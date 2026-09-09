@@ -52,9 +52,10 @@ final class Fundstellenliste: NSView {
         tabelle.delegate = self
         tabelle.allowsEmptySelection = true
         tabelle.allowsMultipleSelection = false
-        // Die Tastensteuerung liegt beim Fenster. Bekäme die Tabelle den
-        // Fokus, würden Pfeiltasten und Ziffern dort landen.
-        tabelle.refusesFirstResponder = true
+        // Die Liste darf den Fokus haben — dann navigieren Pfeil hoch und
+        // runter von Natur aus zwischen den Fundstellen. Im Text täten sie
+        // das nicht, dort bewegen sie die Schreibmarke.
+        tabelle.refusesFirstResponder = false
 
         rollflaeche.documentView = tabelle
         rollflaeche.hasVerticalScroller = true
@@ -87,6 +88,15 @@ final class Fundstellenliste: NSView {
             leerhinweis.trailingAnchor.constraint(equalTo: rollflaeche.trailingAnchor, constant: -16),
         ])
     }
+
+    /// Setzt den Tastaturfokus in die Liste.
+    @discardableResult
+    func fokussiere() -> Bool {
+        guard !zeilen.isEmpty else { return false }
+        return window?.makeFirstResponder(tabelle) ?? false
+    }
+
+    var hatFokus: Bool { window?.firstResponder === tabelle }
 
     func zeige(_ neue: [Zeile], ausgewaehlt: UUID?, leertext: String) {
         zeilen = neue
@@ -151,6 +161,12 @@ extension Fundstellenliste: NSTableViewDataSource, NSTableViewDelegate {
             texte.centerYAnchor.constraint(equalTo: zelle.centerYAnchor),
         ])
         return zelle
+    }
+
+    /// Kein Tippen-zum-Springen. Sonst schluckt die Tabelle die Ziffern, mit
+    /// denen die Kategorie zugewiesen wird.
+    func tableView(_ tableView: NSTableView, typeSelectStringFor tableColumn: NSTableColumn?, row: Int) -> String? {
+        nil
     }
 
     func tableViewSelectionDidChange(_ meldung: Notification) {

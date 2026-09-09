@@ -210,6 +210,14 @@ final class RueckwegAnsicht: NSView, NSUserInterfaceValidations {
         return sortiert[auswahl]
     }
 
+    /// Fokus in die Platzhalterliste, damit die Pfeiltasten sofort greifen.
+    @discardableResult
+    func fokussiereFundstellen() -> Bool {
+        if liste.fokussiere() { return true }
+        window?.makeFirstResponder(textAnsicht)
+        return false
+    }
+
     // MARK: Tasten und Menü
 
     override var acceptsFirstResponder: Bool { true }
