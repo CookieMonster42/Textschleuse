@@ -57,6 +57,11 @@ final class RueckwegPopup: TastaturPanel {
         contentView = behaelter
     }
 
+    override func zeige() {
+        super.zeige()
+        ansicht.fokussiereFundstellen()
+    }
+
     override func keyDown(with ereignis: NSEvent) {
         if ansicht.verarbeite(ereignis) { return }
         super.keyDown(with: ereignis)

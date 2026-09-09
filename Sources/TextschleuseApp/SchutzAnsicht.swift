@@ -72,6 +72,19 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("nicht unterstützt") }
 
+    /// Setzt den Fokus dorthin, wo man ihn braucht: in die Liste, solange es
+    /// Fundstellen gibt, sonst in den Text.
+    ///
+    /// In der Liste navigieren Pfeil hoch und runter ohne Zusatztaste, und die
+    /// Ziffern wirken auf die ausgewählte Stelle. Im Text bewegen dieselben
+    /// Pfeiltasten die Schreibmarke — beides zugleich geht nicht.
+    @discardableResult
+    func fokussiereFundstellen() -> Bool {
+        if liste.fokussiere() { return true }
+        window?.makeFirstResponder(textAnsicht)
+        return false
+    }
+
     /// Wirft den bisherigen Text weg und fängt mit einem neuen an.
     func setze(analyse neue: Analyse) {
         // Ein neuer Text fängt einen neuen Verlauf an; alles davor gehört zu
@@ -84,6 +97,7 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
         zeigeMeldung(nil)
         aktualisiere()
         textAnsicht.scroll(NSPoint(x: 0, y: 0))
+        fokussiereFundstellen()
     }
 
     // MARK: Aufbau
@@ -405,6 +419,11 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
 
     private var hatFreieMarkierung: Bool { freieMarkierung != nil }
 
+    private var textHatFokus: Bool {
+        guard let erster = window?.firstResponder else { return false }
+        return erster === textAnsicht
+    }
+
     /// Rote Meldung für Fehler. Erfolgsmeldungen setzt `meldeNachtrag`.
     private func zeigeMeldung(_ text: String?) {
         meldung.textColor = .systemRed
@@ -463,11 +482,19 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
         case 53:  // Escape
             abbrechen()
             return true
-        case 126 where zusatz.contains(.option):  // ⌥ Pfeil hoch
+        // Pfeiltasten: mit ⌥ von überall, ohne ⌥ nur dann, wenn die
+        // Schreibmarke nicht im Text sitzt — dort gehören sie ihr.
+        case 126 where zusatz.contains(.option) || !textHatFokus:
             waehle(auswahl - 1)
             return true
-        case 125 where zusatz.contains(.option):  // ⌥ Pfeil runter
+        case 125 where zusatz.contains(.option) || !textHatFokus:
             waehle(auswahl + 1)
+            return true
+        case 51 where !textHatFokus:  // Rücktaste in der Liste
+            verwerfeAktuellen()
+            return true
+        case 48:  // Tabulator: zwischen Text und Liste wechseln
+            if textHatFokus { fokussiereFundstellen() } else { window?.makeFirstResponder(textAnsicht) }
             return true
         default:
             break
@@ -479,7 +506,10 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
         // Ist etwas markiert, ist die Sache eindeutig: eine Ziffer würde die
         // Markierung überschreiben, und das will niemand. Also heißt sie hier
         // Kategorie.
-        guard textAnsicht.selectedRange().length > 0,
+        // Zwei Fälle, in denen eine Ziffer die Kategorie meint: es ist etwas
+        // im Text markiert, oder der Fokus liegt in der Liste. Im dritten Fall
+        // — Schreibmarke im Text, nichts markiert — tippt sie eine Ziffer.
+        guard textAnsicht.selectedRange().length > 0 || !textHatFokus,
               let zeichen = ereignis.charactersIgnoringModifiers?.lowercased()
         else { return false }
 
@@ -771,6 +801,26 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
     }
     func vorschauUmschaltenFuerPruefung() { vorschauUmschalten() }
     func waehleFundFuerPruefung(_ kennung: UUID) { waehleFund(kennung) }
+    func ausgewaehlterFundFuerPruefung() -> UUID? { aktuellerFund?.id }
+    @discardableResult
+    func fokussiereTextFuerPruefung() -> Bool {
+        window?.makeFirstResponder(textAnsicht) ?? false
+    }
+    func pfeilFuerPruefung(runter: Bool) -> Bool {
+        guard let ereignis = NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "",
+            charactersIgnoringModifiers: "",
+            isARepeat: false,
+            keyCode: runter ? 125 : 126
+        ) else { return false }
+        return verarbeite(ereignis)
+    }
     func markiereFuerPruefung(_ bereich: NSRange) { textAnsicht.setSelectedRange(bereich) }
     func tasteFuerPruefung(_ zeichen: String) -> Bool {
         guard let ereignis = NSEvent.keyEvent(

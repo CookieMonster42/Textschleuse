@@ -210,7 +210,8 @@ final class Hauptfenster: NSWindowController {
             schutzAnsicht = ansicht
         }
         zeige(schutzAnsicht, in: schutzBehaelter, statt: schutzEingabe)
-        window?.makeFirstResponder(schutzAnsicht)
+        // Fokus in die Fundstellenliste: dort navigieren die Pfeiltasten.
+        schutzAnsicht?.fokussiereFundstellen()
     }
 
     // MARK: Verlauf
@@ -290,7 +291,7 @@ final class Hauptfenster: NSWindowController {
             rueckwegAnsicht = ansicht
         }
         zeige(rueckwegAnsicht, in: rueckwegBehaelter, statt: rueckwegEingabe)
-        window?.makeFirstResponder(rueckwegAnsicht)
+        rueckwegAnsicht?.fokussiereFundstellen()
     }
 
     // MARK: Umschalten

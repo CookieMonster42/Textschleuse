@@ -37,6 +37,7 @@ enum Selbsttest {
         fehler += pruefeSitzung()
         fehler += pruefeZuordnenImRueckweg()
         fehler += pruefeKnoepfeUndMenue()
+        fehler += pruefePfeiltasten()
 
         print("")
         print(fehler == 0 ? "Alles in Ordnung." : "\(fehler) Punkt(e) fehlgeschlagen.")
@@ -731,14 +732,17 @@ enum Selbsttest {
             defer: false
         )
         fenster.contentView = ansicht
+        fenster.makeKeyAndOrderFront(nil)
         fenster.layoutIfNeeded()
         defer { fenster.orderOut(nil) }
 
-        // Ohne Markierung darf die Ziffer nicht abgefangen werden.
+        // Schreibmarke im Text, nichts markiert: dann tippt die 1 eine Eins.
+        ansicht.fokussiereTextFuerPruefung()
+        ansicht.markiereFuerPruefung(NSRange(location: 0, length: 0))
         if ansicht.tasteFuerPruefung("1") == false {
-            print("✓ Ziffern: ohne Markierung tippt die 1 eine Eins")
+            print("✓ Ziffern: Schreibmarke im Text, ohne Markierung tippt die 1 eine Eins")
         } else {
-            print("✗ Ziffern: ohne Markierung wird die 1 abgefangen")
+            print("✗ Ziffern: im Text wird die 1 abgefangen")
             fehler += 1
         }
 
@@ -1122,6 +1126,67 @@ enum Selbsttest {
             print("✓ Bedienung: alle \(menuebefehle.count) Menübefehle kommen an")
         } else {
             print("✗ Bedienung: niemand versteht \(unverstanden.joined(separator: ", "))")
+            fehler += 1
+        }
+        return fehler
+    }
+
+    /// Pfeil hoch und runter müssen zwischen den Fundstellen wandern, sobald
+    /// die Liste den Fokus hat — und die hat sie von Anfang an.
+    private static func pruefePfeiltasten() -> Int {
+        var fehler = 0
+        let text = """
+            Herr Nyström rief an, Frau Weidenbach schrieb,             Rückfragen an a@b.de oder 0621 1234567.
+            """
+        let analyse = Schleuse.analysiere(text, woerterbuch: Woerterbuch())
+        let ansicht = SchutzAnsicht(analyse: analyse)
+
+        // Ein echtes Fenster, das den Fokus annehmen kann.
+        let fenster = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1000, height: 640),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        fenster.contentView = ansicht
+        fenster.makeKeyAndOrderFront(nil)
+        fenster.layoutIfNeeded()
+        defer { fenster.orderOut(nil) }
+
+        if ansicht.fokussiereFundstellen() {
+            print("✓ Pfeiltasten: der Fokus liegt in der Fundstellenliste")
+        } else {
+            print("✗ Pfeiltasten: die Liste nimmt den Fokus nicht an")
+            fehler += 1
+        }
+
+        let ersteAuswahl = ansicht.ausgewaehlterFundFuerPruefung()
+        let runter = ansicht.pfeilFuerPruefung(runter: true)
+        let zweiteAuswahl = ansicht.ausgewaehlterFundFuerPruefung()
+
+        if runter, ersteAuswahl != zweiteAuswahl, zweiteAuswahl != nil {
+            print("✓ Pfeiltasten: ↓ wandert zur nächsten Fundstelle")
+        } else {
+            print("✗ Pfeiltasten: ↓ bewegt die Auswahl nicht")
+            fehler += 1
+        }
+
+        _ = ansicht.pfeilFuerPruefung(runter: false)
+        if ansicht.ausgewaehlterFundFuerPruefung() == ersteAuswahl {
+            print("✓ Pfeiltasten: ↑ wandert zurück")
+        } else {
+            print("✗ Pfeiltasten: ↑ kommt nicht zurück")
+            fehler += 1
+        }
+
+        // Und die Ziffer wirkt auf die ausgewählte Stelle, ohne dass man erst
+        // im Text markieren muss.
+        let vorher = ansicht.analyse.woerterbuch.eintraege.count
+        _ = ansicht.tasteFuerPruefung("1")
+        if ansicht.analyse.woerterbuch.eintraege.count == vorher + 1 {
+            print("✓ Pfeiltasten: 1 wirkt auf die Fundstelle unter dem Fokus")
+        } else {
+            print("✗ Pfeiltasten: 1 hat nichts bewirkt")
             fehler += 1
         }
         return fehler
