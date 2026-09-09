@@ -743,6 +743,24 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
     ///
     /// Im Popup ist es zu: dort geht es um einen Text, nicht um Pflege. Im
     /// Hauptfenster hängt es dauerhaft dran und der Knopf verschwindet.
+    /// Nimmt ein von außen geändertes Wörterbuch an — etwa aus der Spalte im
+    /// Hauptfenster — und prüft den Text damit neu.
+    func uebernimmWoerterbuch(_ geaendert: Woerterbuch) {
+        guard geaendert.eintraege.count != analyse.woerterbuch.eintraege.count
+            || geaendert.alleDecknamen != analyse.woerterbuch.alleDecknamen
+        else { return }
+        let marke = originalMarke()
+        analyse = Schleuse.analysiere(analyse.original, woerterbuch: geaendert)
+        auswahl = 0
+        aktualisiere(originalMarke: marke)
+    }
+
+    /// Im Hauptfenster steht das Wörterbuch als eigene Spalte; dann braucht es
+    /// den Knopf zum Aufklappen nicht.
+    func verbergeKlappenknopf() {
+        klappeKnopf.isHidden = true
+    }
+
     @objc func klappeUmschalten() {
         klappeOffen ? klappeZu() : klappeAuf()
     }

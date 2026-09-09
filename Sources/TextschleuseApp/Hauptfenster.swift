@@ -39,6 +39,10 @@ final class Hauptfenster: NSWindowController {
     private let rueckwegBehaelter = NSView()
     private let verlaufWahl = NSPopUpButton()
     private let verlaufEtikett = NSTextField(labelWithString: "Zuletzt bearbeitet")
+    /// Das Wörterbuch als feste Spalte rechts. Es hängt am Fenster, nicht an
+    /// der Arbeitsfläche — die entsteht erst, wenn ein Text da ist, und bis
+    /// dahin wäre die Spalte leer geblieben.
+    private var woerterbuchSpalte: WoerterbuchAnsicht?
 
     static func zeige(
         woerterbuch: @escaping () -> Woerterbuch,
@@ -141,18 +145,50 @@ final class Hauptfenster: NSWindowController {
         verlaufZeile.spacing = 8
         verlaufZeile.translatesAutoresizingMaskIntoConstraints = false
 
+        let spalte = WoerterbuchAnsicht(
+            woerterbuch: woerterbuch(),
+            schmal: true,
+            beimSichern: { [weak self] geaendert in
+                guard let self else { return }
+                self.beimWoerterbuch(geaendert)
+                // Der laufende Text muss nachziehen: was gerade gemerkt
+                // wurde, gilt ab jetzt auch für ihn.
+                self.schutzAnsicht?.uebernimmWoerterbuch(geaendert)
+            },
+            beimExportieren: { _, _ in }
+        )
+        spalte.translatesAutoresizingMaskIntoConstraints = false
+        woerterbuchSpalte = spalte
+
+        let trenner = NSBox()
+        trenner.boxType = .separator
+        trenner.translatesAutoresizingMaskIntoConstraints = false
+
         let inhalt = NSView()
         inhalt.addSubview(verlaufZeile)
         inhalt.addSubview(reiter)
+        inhalt.addSubview(trenner)
+        inhalt.addSubview(spalte)
         NSLayoutConstraint.activate([
             verlaufZeile.topAnchor.constraint(equalTo: inhalt.topAnchor, constant: 12),
             verlaufZeile.leadingAnchor.constraint(equalTo: inhalt.leadingAnchor, constant: 12),
-            verlaufZeile.trailingAnchor.constraint(lessThanOrEqualTo: inhalt.trailingAnchor, constant: -12),
+            verlaufZeile.trailingAnchor.constraint(lessThanOrEqualTo: trenner.leadingAnchor, constant: -12),
             verlaufWahl.widthAnchor.constraint(greaterThanOrEqualToConstant: 420),
+
             reiter.topAnchor.constraint(equalTo: verlaufZeile.bottomAnchor, constant: 10),
             reiter.leadingAnchor.constraint(equalTo: inhalt.leadingAnchor, constant: 12),
-            reiter.trailingAnchor.constraint(equalTo: inhalt.trailingAnchor, constant: -12),
+            reiter.trailingAnchor.constraint(equalTo: trenner.leadingAnchor, constant: -12),
             reiter.bottomAnchor.constraint(equalTo: inhalt.bottomAnchor, constant: -12),
+
+            trenner.topAnchor.constraint(equalTo: inhalt.topAnchor, constant: 12),
+            trenner.bottomAnchor.constraint(equalTo: inhalt.bottomAnchor, constant: -12),
+            trenner.widthAnchor.constraint(equalToConstant: 1),
+            trenner.trailingAnchor.constraint(equalTo: spalte.leadingAnchor, constant: -12),
+
+            spalte.topAnchor.constraint(equalTo: inhalt.topAnchor, constant: 12),
+            spalte.trailingAnchor.constraint(equalTo: inhalt.trailingAnchor, constant: -12),
+            spalte.bottomAnchor.constraint(equalTo: inhalt.bottomAnchor, constant: -12),
+            spalte.widthAnchor.constraint(equalToConstant: 360),
         ])
         window?.contentView = inhalt
     }
@@ -206,13 +242,17 @@ final class Hauptfenster: NSWindowController {
                 guard let self, let kennung = self.laufenderVorgang else { return }
                 self.sitzung.aktualisiere(kennung, mit: stand)
                 self.aktualisiereVerlauf()
+                // Wächst das Wörterbuch beim Schützen, zeigt die Spalte es
+                // sofort — nicht erst beim nächsten Öffnen.
+                self.woerterbuchSpalte?.setze(woerterbuch: stand.woerterbuch)
             }
             ansicht.beiWoerterbuchAenderung = { [weak self] geaendert in
                 self?.beimWoerterbuch(geaendert)
+                self?.woerterbuchSpalte?.setze(woerterbuch: geaendert)
             }
-            // Im Hauptfenster hängt das Wörterbuch dauerhaft dran. Hier gibt
-            // es Platz, und die Pflege gehört zum Arbeiten dazu.
-            ansicht.klappeAuf(dauerhaft: true)
+            // Die Klappe braucht es hier nicht: das Wörterbuch steht schon
+            // als feste Spalte rechts im Fenster.
+            ansicht.verbergeKlappenknopf()
             schutzAnsicht = ansicht
         }
         zeige(schutzAnsicht, in: schutzBehaelter, statt: schutzEingabe)

@@ -39,6 +39,7 @@ enum Selbsttest {
         fehler += pruefeKnoepfeUndMenue()
         fehler += pruefePfeiltasten()
         fehler += pruefeWoerterbuchDaneben()
+        fehler += pruefeEinstellungen()
 
         print("")
         print(fehler == 0 ? "Alles in Ordnung." : "\(fehler) Punkt(e) fehlgeschlagen.")
@@ -1238,9 +1239,9 @@ enum Selbsttest {
             fehler += 1
         }
 
-        // Hauptfenster: von Anfang an dran, ohne Knopf zum Zuklappen.
+        // Hauptfenster: von Anfang an dran — und zwar auch ohne Text, weil es
+        // am Fenster hängt und nicht an der Arbeitsfläche.
         let sitzung = Sitzung()
-        sitzung.beginne(Schleuse.analysiere(text, woerterbuch: Woerterbuch()))
         let haupt = Hauptfenster(
             woerterbuch: { Woerterbuch() },
             sitzung: sitzung,
@@ -1250,12 +1251,77 @@ enum Selbsttest {
         haupt.window?.layoutIfNeeded()
         defer { haupt.close() }
 
-        let imHauptfenster = haupt.window?.contentView.flatMap { woerterbuchSuchen(in: $0) }
-        if imHauptfenster != nil {
-            print("✓ Wörterbuch daneben: im Hauptfenster von Anfang an sichtbar")
+        let ohneText = haupt.window?.contentView.flatMap { woerterbuchSuchen(in: $0) }
+        if ohneText != nil {
+            print("✓ Wörterbuch daneben: im Hauptfenster auch ohne Text sichtbar")
         } else {
             print("✗ Wörterbuch daneben: im Hauptfenster fehlt es")
             fehler += 1
+        }
+
+        // Und es bleibt, sobald ein Text dazukommt.
+        sitzung.beginne(Schleuse.analysiere(text, woerterbuch: Woerterbuch()))
+        haupt.zeigeNeuesten()
+        haupt.window?.layoutIfNeeded()
+        if haupt.window?.contentView.flatMap({ woerterbuchSuchen(in: $0) }) != nil {
+            print("✓ Wörterbuch daneben: bleibt stehen, wenn ein Text kommt")
+        } else {
+            print("✗ Wörterbuch daneben: verschwindet mit dem Text")
+            fehler += 1
+        }
+        _ = text
+        return fehler
+    }
+
+    /// Die Einstellungen: nimmt das Kurzbefehlfeld eine Kombination an, und
+    /// lehnt es die ab, die nicht gehen?
+    private static func pruefeEinstellungen() -> Int {
+        var fehler = 0
+        var aufgenommen: Tastenkombination?
+        let feld = Kurzbefehlfeld(.schuetzen)
+        feld.beiAufnahme = { aufgenommen = $0 }
+
+        let fenster = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 80),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        fenster.contentView = feld
+        fenster.layoutIfNeeded()
+        defer { fenster.orderOut(nil) }
+
+        // Ohne Zusatztaste: abgelehnt, sonst würde jedes S im System greifen.
+        feld.aufnahmeFuerPruefung()
+        feld.tasteFuerPruefung(code: UInt16(kVK_ANSI_S), zusatz: [])
+        if aufgenommen == nil {
+            print("✓ Einstellungen: eine Taste ohne ⌘ ⌥ ⌃ wird abgelehnt")
+        } else {
+            print("✗ Einstellungen: eine nackte Taste wurde angenommen")
+            fehler += 1
+        }
+
+        // Mit Zusatztasten: angenommen.
+        feld.aufnahmeFuerPruefung()
+        feld.tasteFuerPruefung(code: UInt16(kVK_ANSI_J), zusatz: [.command, .option, .control])
+        if let aufgenommen, aufgenommen.beschriftung.contains("J") {
+            print("✓ Einstellungen: ⌃⌥⌘J wird aufgenommen (\(aufgenommen.beschriftung))")
+        } else {
+            print("✗ Einstellungen: die Kombination kam nicht an")
+            fehler += 1
+        }
+
+        // Und sie überlebt den Weg durch die Ablage.
+        let gemerkt = Einstellungen.gemeinsam.kurzbefehlSchuetzen
+        defer { Einstellungen.gemeinsam.kurzbefehlSchuetzen = gemerkt }
+        if let aufgenommen {
+            Einstellungen.gemeinsam.kurzbefehlSchuetzen = aufgenommen
+            if Einstellungen.gemeinsam.kurzbefehlSchuetzen == aufgenommen {
+                print("✓ Einstellungen: der Kurzbefehl übersteht das Speichern")
+            } else {
+                print("✗ Einstellungen: gespeichert kam etwas anderes zurück")
+                fehler += 1
+            }
         }
         return fehler
     }
