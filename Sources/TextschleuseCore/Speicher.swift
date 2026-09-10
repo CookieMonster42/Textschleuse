@@ -5,6 +5,7 @@ public enum SpeicherFehler: LocalizedError {
     case schluesselNichtLesbar(OSStatus)
     case entschluesselnFehlgeschlagen
     case falscheVersion(Int)
+    case wuerdeSchrumpfen(vorher: Int, nachher: Int)
 
     public var errorDescription: String? {
         switch self {
@@ -18,6 +19,11 @@ public enum SpeicherFehler: LocalizedError {
                 """
         case .falscheVersion(let version):
             return "Das Wörterbuch hat Version \(version) und ist neuer als dieses Programm."
+        case .wuerdeSchrumpfen(let vorher, let nachher):
+            return """
+                Gespeichert werden sollen \(nachher) Einträge, in der Datei stehen \
+                \(vorher). Das sieht nach einem Versehen aus und wurde angehalten.
+                """
         }
     }
 }
@@ -113,8 +119,33 @@ public final class Speicher {
         return buch
     }
 
-    public func sichern(_ buch: Woerterbuch) throws {
+    /// Wo die automatischen Sicherungen liegen.
+    public var sicherungsordner: URL { ordner.appendingPathComponent("sicherungen", isDirectory: true) }
+
+    /// So viele Sicherungen bleiben liegen. Zwanzig reichen für einen
+    /// Arbeitstag; sie sind je wenige Kilobyte groß.
+    public static let sicherungenBehalten = 20
+
+    /// Schreibt das Wörterbuch weg.
+    ///
+    /// Vorher zwei Vorkehrungen, beide aus einem konkreten Verlust heraus
+    /// entstanden: die bisherige Datei wandert in den Sicherungsordner, und
+    /// ein Bestand, der auf weniger als die Hälfte schrumpft, wird angehalten.
+    /// Wer wirklich löschen will, setzt `auchWennKleiner`.
+    public func sichern(_ buch: Woerterbuch, auchWennKleiner: Bool = false) throws {
         try FileManager.default.createDirectory(at: ordner, withIntermediateDirectories: true)
+
+        if FileManager.default.fileExists(atPath: datei.path) {
+            let bisher = try? laden()
+            if let bisher, !auchWennKleiner, wuerdeSchrumpfen(von: bisher, auf: buch) {
+                throw SpeicherFehler.wuerdeSchrumpfen(
+                    vorher: bisher.eintraege.count,
+                    nachher: buch.eintraege.count
+                )
+            }
+            try? legeSicherungAn()
+        }
+
         let klartext = try JSONEncoder.textschleuse.encode(buch)
         let schluessel = try schluesselHolenOderAnlegen()
         let box = try AES.GCM.seal(klartext, using: schluessel)
@@ -136,6 +167,70 @@ public final class Speicher {
     public var hatDatei: Bool {
         FileManager.default.fileExists(atPath: datei.path)
     }
+
+    // MARK: Sicherungen
+
+    /// Verliert der neue Stand mehr als die Hälfte? Ein einzelner gelöschter
+    /// Eintrag ist Alltag, ein Einbruch von 97 auf 4 nicht.
+    func wuerdeSchrumpfen(von alt: Woerterbuch, auf neu: Woerterbuch) -> Bool {
+        let vorher = alt.eintraege.count
+        guard vorher > 0 else { return false }
+        return neu.eintraege.count * 2 < vorher
+    }
+
+    /// Legt die aktuelle Datei als Kopie ab und räumt alte Kopien weg.
+    func legeSicherungAn() throws {
+        try FileManager.default.createDirectory(at: sicherungsordner, withIntermediateDirectories: true)
+        let stempel = Self.stempelformat.string(from: Date())
+        let ziel = sicherungsordner.appendingPathComponent("woerterbuch-\(stempel).dat")
+        if !FileManager.default.fileExists(atPath: ziel.path) {
+            try FileManager.default.copyItem(at: datei, to: ziel)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: ziel.path)
+        }
+
+        let alte = sicherungen()
+        for ueberzaehlig in alte.dropFirst(Self.sicherungenBehalten) {
+            try? FileManager.default.removeItem(at: ueberzaehlig)
+        }
+    }
+
+    /// Alle Sicherungen, neueste zuerst.
+    public func sicherungen() -> [URL] {
+        let inhalt = (try? FileManager.default.contentsOfDirectory(
+            at: sicherungsordner,
+            includingPropertiesForKeys: [.contentModificationDateKey]
+        )) ?? []
+        return inhalt
+            .filter { $0.pathExtension == "dat" }
+            .sorted { links, rechts in
+                let a = (try? links.resourceValues(forKeys: [.contentModificationDateKey]))?
+                    .contentModificationDate ?? .distantPast
+                let b = (try? rechts.resourceValues(forKeys: [.contentModificationDateKey]))?
+                    .contentModificationDate ?? .distantPast
+                return a > b
+            }
+    }
+
+    /// Liest eine Sicherung, ohne sie zu übernehmen.
+    public func lieseSicherung(_ pfad: URL) throws -> Woerterbuch {
+        let verschluesselt = try Data(contentsOf: pfad)
+        for schluessel in try schluesselquelle.alleSchluessel() {
+            guard let box = try? AES.GCM.SealedBox(combined: verschluesselt),
+                  let klartext = try? AES.GCM.open(box, using: schluessel)
+            else { continue }
+            return try JSONDecoder.textschleuse.decode(Woerterbuch.self, from: klartext)
+        }
+        throw SpeicherFehler.entschluesselnFehlgeschlagen
+    }
+
+    private static let stempelformat: DateFormatter = {
+        let format = DateFormatter()
+        // Millisekunden, weil mehrere Änderungen in derselben Sekunde
+        // vorkommen. Ohne sie fiele jede Sicherung nach der ersten weg.
+        format.dateFormat = "yyyy-MM-dd-HHmmss-SSS"
+        format.locale = Locale(identifier: "de_DE")
+        return format
+    }()
 
     // MARK: Klartext
 
