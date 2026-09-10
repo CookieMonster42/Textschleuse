@@ -43,6 +43,7 @@ enum Selbsttest {
         fehler += pruefeWeiterspringen()
         fehler += pruefeFenstergroesse()
         fehler += pruefeZuordnungsliste()
+        fehler += pruefeWoerterbuchBeiEnge()
 
         print("")
         print(fehler == 0 ? "Alles in Ordnung." : "\(fehler) Punkt(e) fehlgeschlagen.")
@@ -55,6 +56,15 @@ enum Selbsttest {
         defer { try? FileManager.default.removeItem(at: ordner) }
 
         let speicher = Speicher(ordner: ordner)
+        // Der Selbsttest darf den gelebten Bestand nicht anfassen. Wenn diese
+        // Zusicherung je bricht, soll es hier auffallen und nicht dort.
+        guard !speicher.istEchterBestand else {
+            print("✗ Keychain: der Selbsttest zeigt auf den echten Bestand — abgebrochen")
+            return 1
+        }
+        print("✓ Bestand: der Selbsttest arbeitet in \(ordner.lastPathComponent), "
+            + "nicht in \(Speicher.echterOrdner.lastPathComponent)")
+
         var buch = Woerterbuch()
         _ = buch.anlegen(text: "Selbsttest Person", kategorie: .person)
 
@@ -415,10 +425,10 @@ enum Selbsttest {
         // Liste: zwei Einträge, einer davon mit Schreibweise, macht drei Zeilen.
         // Es gibt zwei Tabellen — „Im Text" und „Alle". Gemeint ist die volle.
         let tabelle = tabellenSammeln(in: inhalt).max { $0.numberOfRows < $1.numberOfRows }
-        if tabelle?.numberOfRows == 3 {
+        if let tabelle, datenzeilen(tabelle) == 3 {
             print("✓ Wörterbuch: 3 Zeilen, Schreibweise eingerückt unter der Hauptnennung")
         } else {
-            print("✗ Wörterbuch: \(tabelle?.numberOfRows ?? -1) Zeilen statt 3")
+            print("✗ Wörterbuch: \(tabelle.map(datenzeilen) ?? -1) Zeilen statt 3")
             fehler += 1
         }
 
@@ -1291,6 +1301,101 @@ enum Selbsttest {
         return fehler
     }
 
+    /// Das Wörterbuch neben dem Text, wenn es eng wird. Genau hier fiel es
+    /// bisher auf die Kopfzeile zusammen: die Ansicht forderte 660 Punkte
+    /// Höhe, bekam 360, und eine gebrochene Constraint ließ die Listen auf
+    /// null schrumpfen. Sichtbar war dann nur noch „Begriff | Deckname".
+    private static func pruefeWoerterbuchBeiEnge() -> Int {
+        var fehler = 0
+
+        var buch = Woerterbuch()
+        for nummer in 1...97 { _ = buch.anlegen(text: "Person Nummer \(nummer)", kategorie: .person) }
+
+        /// Misst eine eingebaute Ansicht: wie viele Datenzeilen sind zu sehen,
+        /// und lässt sich die Liste rollen?
+        func miss(_ ort: String, _ ansicht: WoerterbuchAnsicht, _ hoehe: CGFloat) -> Int {
+            var schaden = 0
+            let tabellen = tabellenSammeln(in: ansicht)
+            guard let alle = tabellen.max(by: { $0.numberOfRows < $1.numberOfRows }),
+                  let rolle = alle.enclosingScrollView
+            else {
+                print("✗ Enge (\(ort)): keine Liste gefunden")
+                return 1
+            }
+            let sichtbar = rolle.contentView.bounds.height
+            let zeilen = Int(sichtbar / max(1, alle.rowHeight))
+            let rollbar = alle.frame.height > sichtbar + 1
+            print("   [Diagnose] \(ort): Fläche \(Int(hoehe)) pt, Liste \(Int(sichtbar)) pt "
+                + "= \(zeilen) Zeilen, Inhalt \(Int(alle.frame.height)) pt")
+            if zeilen >= 4 {
+                print("✓ Enge (\(ort)): \(zeilen) Zeilen sichtbar")
+            } else {
+                print("✗ Enge (\(ort)): nur \(zeilen) Zeilen sichtbar")
+                schaden += 1
+            }
+            if rollbar {
+                print("✓ Enge (\(ort)): die Liste lässt sich rollen")
+            } else {
+                print("✗ Enge (\(ort)): nichts zu rollen, Inhalt passt angeblich ins Bild")
+                schaden += 1
+            }
+            // Rollen können reicht nicht — man muss auch sehen, dass es geht.
+            let balkenDa = rolle.verticalScroller.map { !$0.isHidden && $0.frame.width > 0 } ?? false
+            if balkenDa {
+                print("✓ Enge (\(ort)): der Rollbalken ist sichtbar")
+            } else {
+                print("✗ Enge (\(ort)): kein sichtbarer Rollbalken")
+                schaden += 1
+            }
+            return schaden
+        }
+
+        // Einbauort 1: die Klappe im Popup. Das Popup ist 70 Prozent der
+        // Bildschirmhöhe hoch, davon bleibt für die Klappe wenig übrig.
+        let popupHoehe: CGFloat = 640
+        let ansicht = SchutzAnsicht(analyse: Schleuse.analysiere(
+            "Herr Nyström rief an.",
+            woerterbuch: buch
+        ))
+        let popup = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 980, height: popupHoehe),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        popup.contentView = ansicht
+        ansicht.klappeUmschalten()
+        popup.layoutIfNeeded()
+        defer { popup.orderOut(nil) }
+        if let klappe = woerterbuchSuchen(in: ansicht) {
+            fehler += miss("Popup-Klappe", klappe, klappe.frame.height)
+        } else {
+            print("✗ Enge (Popup-Klappe): nicht aufgeklappt")
+            fehler += 1
+        }
+
+        // Einbauort 2: die feste Spalte im Hauptfenster, auf Mindestgröße
+        // gestaucht.
+        let sitzung = Sitzung()
+        sitzung.beginne(Schleuse.analysiere("Herr Nyström rief an.", woerterbuch: buch))
+        let haupt = Hauptfenster(
+            woerterbuch: { buch },
+            sitzung: sitzung,
+            beimSchuetzen: { _, _ in },
+            beimZurueckdrehen: { _ in }
+        )
+        defer { haupt.close() }
+        haupt.window?.setContentSize(NSSize(width: 1200, height: 700))
+        haupt.window?.layoutIfNeeded()
+        if let spalte = haupt.window?.contentView.flatMap({ woerterbuchSuchen(in: $0) }) {
+            fehler += miss("Hauptfenster eng", spalte, spalte.frame.height)
+        } else {
+            print("✗ Enge (Hauptfenster eng): keine Spalte")
+            fehler += 1
+        }
+        return fehler
+    }
+
     /// Die Zuordnungsliste: geclustert, alphabetisch, durchsuchbar.
     private static func pruefeZuordnungsliste() -> Int {
         var fehler = 0
@@ -1462,7 +1567,7 @@ enum Selbsttest {
             spalte.setze(imText: [])
             haupt.window?.layoutIfNeeded()
             let alleTabelle = tabellenSammeln(in: spalte).max { $0.numberOfRows < $1.numberOfRows }
-            if let alleTabelle, alleTabelle.numberOfRows == 40 {
+            if let alleTabelle, datenzeilen(alleTabelle) == 40 {
                 let rolle = alleTabelle.enclosingScrollView
                 let sichtbareHoehe = rolle?.contentView.bounds.height ?? 0
                 let zeilenSichtbar = Int(sichtbareHoehe / max(1, alleTabelle.rowHeight))
@@ -1479,17 +1584,17 @@ enum Selbsttest {
                     fehler += 1
                 }
             } else {
-                print("✗ Wörterbuch daneben: \(alleTabelle?.numberOfRows ?? -1) von 40 Einträgen")
+                print("✗ Wörterbuch daneben: \(alleTabelle.map(datenzeilen) ?? -1) von 40 Einträgen")
                 fehler += 1
             }
             spalte.setze(woerterbuch: buch)
             spalte.setze(imText: [])
             haupt.window?.layoutIfNeeded()
-            let ohne = tabellenSammeln(in: spalte).map(\.numberOfRows).sorted()
+            let ohne = tabellenSammeln(in: spalte).map(datenzeilen).sorted()
 
             spalte.setze(imText: [eintrag.id])
             haupt.window?.layoutIfNeeded()
-            let mit = tabellenSammeln(in: spalte).map(\.numberOfRows).sorted()
+            let mit = tabellenSammeln(in: spalte).map(datenzeilen).sorted()
 
             // Drei Tabellen: die beiden Listen und die Schreibweisen im
             // Editor. Geprüft wird deshalb, dass die erwarteten Zahlen
@@ -1566,6 +1671,15 @@ enum Selbsttest {
         if let tabelle = ansicht as? NSTableView { gefunden.append(tabelle) }
         for unter in ansicht.subviews { gefunden += tabellenSammeln(in: unter) }
         return gefunden
+    }
+
+    /// Zeilen ohne die Typköpfe. Seit die Liste nach Typ gruppiert, ist
+    /// `numberOfRows` nicht mehr dasselbe wie die Zahl der Einträge.
+    private static func datenzeilen(_ tabelle: NSTableView) -> Int {
+        let delegat = tabelle.delegate
+        return (0..<tabelle.numberOfRows).count { zeile in
+            !(delegat?.tableView?(tabelle, isGroupRow: zeile) ?? false)
+        }
     }
 
     /// Die Einstellungen: nimmt das Kurzbefehlfeld eine Kombination an, und

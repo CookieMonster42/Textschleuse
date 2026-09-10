@@ -39,6 +39,9 @@ final class WoerterbuchAnsicht: NSView {
         var platzhalter: String
         var kategorie: String
         var herkunft: String
+        /// Trennzeile über einem Typblock. Trägt keine Daten und lässt sich
+        /// nicht auswählen; `eintragId` ist dann bedeutungslos.
+        var istKopf: Bool = false
     }
 
     private var zeilen: [Zeile] = []
@@ -86,10 +89,11 @@ final class WoerterbuchAnsicht: NSView {
     required init?(coder: NSCoder) { fatalError("nicht unterstützt") }
 
     private func baueOberflaeche() {
-        // Im schmalen Fall bleibt kein Platz für vier Spalten nebeneinander.
-        // Begriff und Deckname reichen; Typ und Herkunft stehen im Editor.
+        // Im schmalen Fall bleibt kein Platz für Spalten nebeneinander. Eine
+        // einzige Spalte ohne Kopfzeile, Begriff und Deckname übereinander —
+        // Typ und Herkunft stehen im Editor.
         let spaltenBeschreibung: [(String, String, Double)] = schmal
-            ? [("text", "Begriff", 150.0), ("platzhalter", "Deckname", 100.0)]
+            ? [("text", "Begriff", 180.0)]
             : [
                 ("text", "Begriff", 220.0),
                 ("platzhalter", "Deckname", 130.0),
@@ -100,23 +104,35 @@ final class WoerterbuchAnsicht: NSView {
             let spalte = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(kennung))
             spalte.title = titel
             spalte.width = breite
+            spalte.resizingMask = .autoresizingMask
             tabelle.addTableColumn(spalte)
         }
         tabelle.dataSource = self
         tabelle.delegate = self
         tabelle.usesAlternatingRowBackgroundColors = true
         tabelle.allowsMultipleSelection = true
+        if schmal {
+            tabelle.headerView = nil
+            tabelle.rowHeight = 26
+            tabelle.style = .inset
+        }
 
         // Die linke Tabelle zeigt dieselben Spalten, nur gefiltert.
         for spalte in tabelle.tableColumns {
             let kopie = NSTableColumn(identifier: spalte.identifier)
             kopie.title = spalte.title
             kopie.width = spalte.width
+            kopie.resizingMask = .autoresizingMask
             tabelleImText.addTableColumn(kopie)
         }
         tabelleImText.dataSource = self
         tabelleImText.delegate = self
         tabelleImText.usesAlternatingRowBackgroundColors = true
+        if schmal {
+            tabelleImText.headerView = nil
+            tabelleImText.rowHeight = 26
+            tabelleImText.style = .inset
+        }
 
         let rollflaeche = NSScrollView()
         rollflaeche.documentView = tabelle
@@ -129,6 +145,14 @@ final class WoerterbuchAnsicht: NSView {
         rolleImText.hasVerticalScroller = true
         rolleImText.borderType = .bezelBorder
         rolleImText.translatesAutoresizingMaskIntoConstraints = false
+
+        // Der überlagernde Rollbalken blendet sich aus, sobald man die Maus
+        // wegnimmt. Bei 97 Einträgen und zwölf sichtbaren Zeilen sieht man
+        // dann nicht, dass da noch etwas kommt.
+        for rolle in [rollflaeche, rolleImText] where schmal {
+            rolle.scrollerStyle = .legacy
+            rolle.autohidesScrollers = false
+        }
 
         for kopf in [ueberschriftImText, ueberschriftAlle] {
             kopf.font = .systemFont(ofSize: 11, weight: .semibold)
@@ -208,15 +232,23 @@ final class WoerterbuchAnsicht: NSView {
         spalteImText.spacing = 4
         spalteImText.translatesAutoresizingMaskIntoConstraints = false
 
-        let spalteAlle = NSStackView(views: [ueberschriftAlle, suchfeld, aufloesungZeile, rollflaeche])
+        let spalteAlle = NSStackView(views: [ueberschriftAlle, rollflaeche])
         spalteAlle.orientation = .vertical
         spalteAlle.spacing = 4
         spalteAlle.translatesAutoresizingMaskIntoConstraints = false
 
-        let links = NSStackView(views: [spalteImText, spalteAlle])
-        links.orientation = .horizontal
-        links.spacing = 12
-        links.distribution = .fillEqually
+        let nebeneinander = NSStackView(views: [spalteImText, spalteAlle])
+        nebeneinander.orientation = .horizontal
+        nebeneinander.spacing = 12
+        nebeneinander.distribution = .fillEqually
+        nebeneinander.translatesAutoresizingMaskIntoConstraints = false
+
+        // Das Suchfeld steht über beiden Listen, nicht nur über der rechten.
+        // Vorher begann die linke Liste eine Suchfeldhöhe weiter oben als die
+        // rechte, und das sah schief aus.
+        let links = NSStackView(views: [suchfeld, aufloesungZeile, nebeneinander])
+        links.orientation = .vertical
+        links.spacing = 6
         links.translatesAutoresizingMaskIntoConstraints = false
 
         // Rollflächen haben keine eigene Größe. In einem einzelnen Stapel
@@ -264,22 +296,23 @@ final class WoerterbuchAnsicht: NSView {
 
         NSLayoutConstraint.activate([
             mitte.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -32),
-            mitte.heightAnchor.constraint(greaterThanOrEqualToConstant: schmal ? 240 : 380),
+            mitte.heightAnchor.constraint(greaterThanOrEqualToConstant: schmal ? 210 : 380),
             knopfleiste.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -32),
             hinweis.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -32),
-            suchfeld.widthAnchor.constraint(equalTo: spalteAlle.widthAnchor),
+            suchfeld.widthAnchor.constraint(equalTo: links.widthAnchor),
+            aufloesungZeile.widthAnchor.constraint(equalTo: links.widthAnchor),
+            nebeneinander.widthAnchor.constraint(equalTo: links.widthAnchor),
             rollflaeche.widthAnchor.constraint(equalTo: spalteAlle.widthAnchor),
             rolleImText.widthAnchor.constraint(equalTo: spalteImText.widthAnchor),
-            aufloesungZeile.widthAnchor.constraint(equalTo: spalteAlle.widthAnchor),
 
             // Ohne diese Maße bleibt von den Listen nichts übrig. Schmal
             // stehen Listen und Editor untereinander — dort müssen die Maße
             // kleiner sein, sonst fordert die Spalte 809 Punkte Höhe und das
             // Hauptfenster passt auf kein 13-Zoll-Bild mehr.
             links.widthAnchor.constraint(equalTo: mitte.widthAnchor),
-            links.heightAnchor.constraint(greaterThanOrEqualToConstant: schmal ? 240 : 380),
-            rollflaeche.heightAnchor.constraint(greaterThanOrEqualToConstant: schmal ? 150 : 200),
-            rolleImText.heightAnchor.constraint(greaterThanOrEqualToConstant: schmal ? 150 : 200),
+            nebeneinander.heightAnchor.constraint(greaterThanOrEqualToConstant: schmal ? 210 : 380),
+            rollflaeche.heightAnchor.constraint(greaterThanOrEqualToConstant: schmal ? 130 : 200),
+            rolleImText.heightAnchor.constraint(greaterThanOrEqualToConstant: schmal ? 130 : 200),
             rollflaeche.bottomAnchor.constraint(equalTo: spalteAlle.bottomAnchor),
             rolleImText.bottomAnchor.constraint(equalTo: spalteImText.bottomAnchor),
             schmal
@@ -293,18 +326,29 @@ final class WoerterbuchAnsicht: NSView {
     private func aktualisiere() {
         let filter = suchfeld.stringValue.trimmingCharacters(in: .whitespaces).lowercased()
 
-        zeilen = woerterbuch.eintraege
-            .filter { eintrag in
-                guard !filter.isEmpty else { return true }
-                return eintrag.text.lowercased().contains(filter)
-                    || eintrag.aliase.contains { $0.text.lowercased().contains(filter) }
-                    // Alle Decknamen, auch die von Schreibweisen und die
-                    // früheren — sonst findest du nicht, was in einer alten
-                    // Mail steht.
-                    || eintrag.alleDecknamen.contains { $0.lowercased().contains(filter) }
-            }
-            .sorted { ($0.kategorie.praefix, $0.nummer) < ($1.kategorie.praefix, $1.nummer) }
-            .flatMap { eintrag -> [Zeile] in
+        // Frühere Decknamen findet die gemeinsame Suche nicht — sie kennt nur
+        // die aktuellen. Wer eine alte Mail zurückdreht, sucht aber genau
+        // danach, deshalb hier zusätzlich.
+        let treffer = Eintragsliste.gefiltert(woerterbuch.eintraege, suche: filter)
+        let nachAltnamen = filter.isEmpty ? [] : woerterbuch.eintraege.filter { eintrag in
+            eintrag.alleDecknamen.contains { $0.lowercased().contains(filter) }
+        }
+        let alleTreffer = treffer + nachAltnamen.filter { alt in !treffer.contains { $0.id == alt.id } }
+
+        // Nach Typ geclustert, innerhalb alphabetisch — dieselbe Ordnung wie
+        // beim Zuordnen. Bei 97 Einträgen findet man in einer flachen Liste
+        // nach Nummer sonst gar nichts.
+        zeilen = Eintragsliste.gruppiert(alleTreffer).flatMap { gruppe -> [Zeile] in
+            let kopf = Zeile(
+                eintragId: UUID(),
+                istAlias: false,
+                text: "\(gruppe.kategorie.anzeigename)  ·  \(gruppe.eintraege.count)",
+                platzhalter: "",
+                kategorie: gruppe.kategorie.anzeigename,
+                herkunft: "",
+                istKopf: true
+            )
+            return [kopf] + gruppe.eintraege.flatMap { eintrag -> [Zeile] in
                 let haupt = Zeile(
                     eintragId: eintrag.id,
                     istAlias: false,
@@ -325,8 +369,10 @@ final class WoerterbuchAnsicht: NSView {
                 }
                 return [haupt] + aliase
             }
+        }
 
-        zeilenImText = zeilen.filter { imText.contains($0.eintragId) }
+        // Die linke Liste ist kurz — dort wären Typköpfe nur Ballast.
+        zeilenImText = zeilen.filter { !$0.istKopf && imText.contains($0.eintragId) }
         ueberschriftImText.stringValue = zeilenImText.isEmpty
             ? "Im Text"
             : "Im Text (\(Set(zeilenImText.map(\.eintragId)).count))"
@@ -500,6 +546,15 @@ extension WoerterbuchAnsicht: NSTableViewDataSource, NSTableViewDelegate {
             return nil
         }
         let zeile = quelle[row]
+        if zeile.istKopf {
+            guard spalte == "text" else { return nil }
+            let titel = NSTextField(labelWithString: zeile.text)
+            titel.font = .systemFont(ofSize: 11, weight: .semibold)
+            titel.textColor = .secondaryLabelColor
+            return titel
+        }
+        if schmal { return schmaleZelle(zeile) }
+
         let inhalt: String
         switch spalte {
         case "text": inhalt = zeile.text
@@ -515,6 +570,58 @@ extension WoerterbuchAnsicht: NSTableViewDataSource, NSTableViewDelegate {
         feld.textColor = zeile.istAlias ? .secondaryLabelColor : .labelColor
         feld.lineBreakMode = .byTruncatingTail
         return feld
+    }
+
+    /// Begriff und Deckname übereinander in einer Zelle. Nebeneinander
+    /// bräuchten sie 250 Punkte; in der schmalen Spalte stehen nur 190 zur
+    /// Verfügung, und dann wird aus „Deckname" ein „D".
+    private func schmaleZelle(_ zeile: Zeile) -> NSView {
+        let begriff = NSTextField(labelWithString: zeile.text)
+        begriff.font = .systemFont(ofSize: 11, weight: zeile.istAlias ? .regular : .medium)
+        begriff.textColor = zeile.istAlias ? .secondaryLabelColor : .labelColor
+        begriff.lineBreakMode = .byTruncatingTail
+
+        let deckname = NSTextField(labelWithString: zeile.platzhalter)
+        deckname.font = .monospacedSystemFont(ofSize: 9, weight: .regular)
+        deckname.textColor = .secondaryLabelColor
+        deckname.lineBreakMode = .byTruncatingTail
+
+        let texte = NSStackView(views: [begriff, deckname])
+        texte.orientation = .vertical
+        texte.spacing = 0
+        texte.alignment = .leading
+        texte.translatesAutoresizingMaskIntoConstraints = false
+
+        let zelle = NSTableCellView()
+        zelle.addSubview(texte)
+        NSLayoutConstraint.activate([
+            // Schreibweisen rücken ein, damit sie als Anhängsel lesbar sind.
+            texte.leadingAnchor.constraint(
+                equalTo: zelle.leadingAnchor,
+                constant: zeile.istAlias ? 16 : 4
+            ),
+            texte.trailingAnchor.constraint(equalTo: zelle.trailingAnchor, constant: -4),
+            texte.centerYAnchor.constraint(equalTo: zelle.centerYAnchor),
+        ])
+        return zelle
+    }
+
+    func tableView(_ tableView: NSTableView, isGroupRow row: Int) -> Bool {
+        let quelle = tableView === tabelleImText ? zeilenImText : zeilen
+        return quelle.indices.contains(row) && quelle[row].istKopf
+    }
+
+    /// Typköpfe lassen sich nicht anwählen — die Pfeiltasten überspringen sie
+    /// dadurch von selbst, und der Editor bekommt nie eine leere Zeile.
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
+        let quelle = tableView === tabelleImText ? zeilenImText : zeilen
+        return quelle.indices.contains(row) && !quelle[row].istKopf
+    }
+
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        let quelle = tableView === tabelleImText ? zeilenImText : zeilen
+        if quelle.indices.contains(row), quelle[row].istKopf { return 22 }
+        return tableView.rowHeight
     }
 
     func tableViewSelectionDidChange(_ meldung: Notification) {

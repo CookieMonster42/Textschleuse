@@ -61,14 +61,22 @@ public final class Speicher {
 
     private let schluesselquelle: Schluesselquelle
 
+    /// Der Ordner, in dem das echte Wörterbuch liegt. Nur die laufende App
+    /// darf hier hinein. Prüfungen und Selbsttest bekommen einen Wegwerfordner
+    /// übergeben — sonst würden sie am gelebten Bestand herumschreiben.
+    public static var echterOrdner: URL {
+        let basis = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return basis.appendingPathComponent(bundleId, isDirectory: true)
+    }
+
     public init(ordner: URL? = nil, schluesselquelle: Schluesselquelle = KeychainSchluessel()) {
-        if let ordner {
-            self.ordner = ordner
-        } else {
-            let basis = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            self.ordner = basis.appendingPathComponent(Self.bundleId, isDirectory: true)
-        }
+        self.ordner = ordner ?? Self.echterOrdner
         self.schluesselquelle = schluesselquelle
+    }
+
+    /// Zeigt dieser Speicher auf den echten Bestand?
+    public var istEchterBestand: Bool {
+        ordner.standardizedFileURL == Self.echterOrdner.standardizedFileURL
     }
 
     // MARK: Laden und Sichern
