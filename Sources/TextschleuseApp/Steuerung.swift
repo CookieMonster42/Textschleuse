@@ -183,6 +183,11 @@ final class Steuerung: NSObject, NSApplicationDelegate {
             .target = self
         programmMenue.addItem(withTitle: "Wörterbuch …", action: #selector(zeigeWoerterbuch), keyEquivalent: "d")
             .target = self
+        programmMenue.addItem(
+            withTitle: "Aus Sicherung wiederherstellen …",
+            action: #selector(stelleAusSicherungWiederHer),
+            keyEquivalent: ""
+        ).target = self
         programmMenue.addItem(.separator())
         programmMenue.addItem(
             withTitle: "Textschleuse ausblenden",
@@ -414,12 +419,7 @@ final class Steuerung: NSObject, NSApplicationDelegate {
             mitHinweisen: Einstellungen.gemeinsam.hinweiseMitkopieren
         ))
 
-        do {
-            try speicher.sichern(woerterbuch)
-        } catch {
-            zeigeFehler("Das Wörterbuch ließ sich nicht speichern", error)
-            return
-        }
+        guard sichereWoerterbuch(woerterbuch) else { return }
 
         if !hatDateiVorher { frageNachBackup() }
     }
@@ -453,12 +453,10 @@ final class Steuerung: NSObject, NSApplicationDelegate {
     /// Nimmt ein geändertes Wörterbuch an und schreibt es weg. Eine Zuordnung
     /// im Rückweg wäre sonst beim nächsten Text wieder verloren.
     private func uebernimmWoerterbuch(_ geaendert: Woerterbuch) {
+        // Erst schreiben, dann übernehmen: wird die Rückfrage abgelehnt, soll
+        // auch der Stand im Speicher der alte bleiben.
+        guard sichereWoerterbuch(geaendert) else { return }
         woerterbuch = geaendert
-        do {
-            try speicher.sichern(woerterbuch)
-        } catch {
-            zeigeFehler("Das Wörterbuch ließ sich nicht speichern", error)
-        }
     }
 
     // MARK: Menüeinträge
@@ -468,8 +466,8 @@ final class Steuerung: NSObject, NSApplicationDelegate {
         WoerterbuchFenster.zeige(
             woerterbuch: woerterbuch,
             beimSichern: { [weak self] geaendert in
+                guard self?.sichereWoerterbuch(geaendert) == true else { return }
                 self?.woerterbuch = geaendert
-                try? self?.speicher.sichern(geaendert)
             },
             beimExportieren: { [weak self] ziel, buch in
                 try self?.speicher.exportiereKlartext(buch, nach: ziel)
@@ -530,6 +528,95 @@ final class Steuerung: NSObject, NSApplicationDelegate {
             Einstellungen.gemeinsam.backupPfad = ziel
         } catch {
             zeigeFehler("Das Backup ließ sich nicht schreiben", error)
+        }
+    }
+
+    /// Der einzige Weg, auf dem das Wörterbuch auf die Platte kommt.
+    ///
+    /// Schrumpft der Bestand drastisch, fragt der Speicher zurück statt zu
+    /// schreiben. Das ist aus einem Verlust entstanden: 97 Einträge wurden
+    /// klaglos durch eine Handvoll ersetzt, und ohne Sicherung war das nicht
+    /// mehr zu holen.
+    @discardableResult
+    func sichereWoerterbuch(_ buch: Woerterbuch) -> Bool {
+        do {
+            try speicher.sichern(buch)
+            return true
+        } catch let fehler as SpeicherFehler {
+            guard case .wuerdeSchrumpfen(let vorher, let nachher) = fehler else {
+                zeigeFehler("Das Wörterbuch ließ sich nicht speichern", fehler)
+                return false
+            }
+            NSApp.activate(ignoringOtherApps: true)
+            let frage = NSAlert()
+            frage.messageText = "Der Bestand schrumpft von \(vorher) auf \(nachher) Einträge"
+            frage.informativeText = """
+                Wenn du gerade nichts Größeres gelöscht hast, ist das ein Fehler. \
+                Abbrechen lässt die Datei unangetastet.
+
+                Die letzten Stände liegen unter „Wörterbuch › Aus Sicherung \
+                wiederherstellen …".
+                """
+            frage.alertStyle = .critical
+            frage.addButton(withTitle: "Abbrechen")
+            frage.addButton(withTitle: "Trotzdem speichern")
+            guard frage.runModal() == .alertSecondButtonReturn else { return false }
+            do {
+                try speicher.sichern(buch, auchWennKleiner: true)
+                return true
+            } catch {
+                zeigeFehler("Das Wörterbuch ließ sich nicht speichern", error)
+                return false
+            }
+        } catch {
+            zeigeFehler("Das Wörterbuch ließ sich nicht speichern", error)
+            return false
+        }
+    }
+
+    /// Holt einen früheren Stand zurück. Zeigt vorher, was drinsteht.
+    @objc func stelleAusSicherungWiederHer() {
+        NSApp.activate(ignoringOtherApps: true)
+        let staende = speicher.sicherungen()
+        guard !staende.isEmpty else {
+            let leer = NSAlert()
+            leer.messageText = "Es gibt noch keine Sicherungen"
+            leer.informativeText = "Ab dieser Version legt jedes Speichern eine an, unter "
+                + speicher.sicherungsordner.path
+            leer.runModal()
+            return
+        }
+
+        let auswahl = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 380, height: 25))
+        for pfad in staende {
+            let anzahl = (try? speicher.lieseSicherung(pfad).eintraege.count).map { "\($0) Einträge" }
+                ?? "unlesbar"
+            auswahl.addItem(withTitle: "\(pfad.lastPathComponent) — \(anzahl)")
+            auswahl.lastItem?.representedObject = pfad
+        }
+
+        let frage = NSAlert()
+        frage.messageText = "Aus Sicherung wiederherstellen"
+        frage.informativeText = "Der jetzige Stand (\(woerterbuch.eintraege.count) Einträge) "
+            + "wird vorher selbst als Sicherung abgelegt."
+        frage.accessoryView = auswahl
+        frage.addButton(withTitle: "Wiederherstellen")
+        frage.addButton(withTitle: "Abbrechen")
+        guard frage.runModal() == .alertFirstButtonReturn,
+              let pfad = auswahl.selectedItem?.representedObject as? URL
+        else { return }
+
+        do {
+            let alt = try speicher.lieseSicherung(pfad)
+            try speicher.sichern(alt, auchWennKleiner: true)
+            woerterbuch = alt
+            let fertig = NSAlert()
+            fertig.messageText = "Wiederhergestellt"
+            fertig.informativeText = "\(alt.eintraege.count) Einträge aus "
+                + pfad.lastPathComponent + "."
+            fertig.runModal()
+        } catch {
+            zeigeFehler("Die Sicherung ließ sich nicht lesen", error)
         }
     }
 

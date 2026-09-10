@@ -1322,4 +1322,126 @@ Pruefstand.pruefe("Eintragsliste: Suche ohne Rücksicht auf Umlaute und Fälle")
     Pruefstand.gleich(leer.count, 0, "kein Treffer, keine leeren Blöcke")
 }
 
+// MARK: Schutz vor Datenverlust
+
+Pruefstand.pruefe("Speicher: legt vor jedem Schreiben eine Sicherung an") {
+    let ordner = FileManager.default.temporaryDirectory
+        .appendingPathComponent("textschleuse-pruefung-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: ordner) }
+    let speicher = Speicher(ordner: ordner, schluesselquelle: FesterSchluessel())
+
+    var buch = Woerterbuch()
+    for nummer in 1...10 { _ = buch.anlegen(text: "Person \(nummer)", kategorie: .person) }
+    do {
+        try speicher.sichern(buch)
+        Pruefstand.gleich(speicher.sicherungen().count, 0, "beim ersten Mal gibt es nichts zu sichern")
+
+        _ = buch.anlegen(text: "Person 11", kategorie: .person)
+        try speicher.sichern(buch)
+        Pruefstand.gleich(speicher.sicherungen().count, 1, "der vorherige Stand liegt als Kopie da")
+
+        let kopie = try speicher.lieseSicherung(speicher.sicherungen()[0])
+        Pruefstand.gleich(kopie.eintraege.count, 10, "und enthält den Stand von vorher")
+    } catch {
+        Pruefstand.wahr(false, "sichern ohne Fehler (\(error))")
+    }
+}
+
+Pruefstand.pruefe("Speicher: hält drastisches Schrumpfen an") {
+    let ordner = FileManager.default.temporaryDirectory
+        .appendingPathComponent("textschleuse-pruefung-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: ordner) }
+    let speicher = Speicher(ordner: ordner, schluesselquelle: FesterSchluessel())
+
+    var voll = Woerterbuch()
+    for nummer in 1...97 { _ = voll.anlegen(text: "Person \(nummer)", kategorie: .person) }
+    do {
+        try speicher.sichern(voll)
+    } catch {
+        Pruefstand.wahr(false, "Grundstand geschrieben (\(error))")
+        return
+    }
+
+    // Genau der Fall, der 97 Einträge gekostet hat.
+    var fastLeer = Woerterbuch()
+    for nummer in 1...4 { _ = fastLeer.anlegen(text: "Person \(nummer)", kategorie: .person) }
+    do {
+        try speicher.sichern(fastLeer)
+        Pruefstand.wahr(false, "97 auf 4 hätte einen Fehler werfen müssen")
+    } catch let fehler as SpeicherFehler {
+        guard case .wuerdeSchrumpfen(let vorher, let nachher) = fehler else {
+            Pruefstand.wahr(false, "falscher Fehler: \(fehler)")
+            return
+        }
+        Pruefstand.gleich(vorher, 97, "meldet den alten Stand")
+        Pruefstand.gleich(nachher, 4, "und den neuen")
+    } catch {
+        Pruefstand.wahr(false, "falscher Fehler: \(error)")
+    }
+
+    // Die Datei muss unangetastet sein.
+    Pruefstand.gleich(
+        (try? speicher.laden())?.eintraege.count,
+        97,
+        "abgelehnt heißt: nichts geschrieben"
+    )
+
+    // Mit Ansage geht es durch.
+    do {
+        try speicher.sichern(fastLeer, auchWennKleiner: true)
+        Pruefstand.gleich((try? speicher.laden())?.eintraege.count, 4, "mit Ansage wird geschrieben")
+    } catch {
+        Pruefstand.wahr(false, "mit Ansage ohne Fehler (\(error))")
+    }
+}
+
+Pruefstand.pruefe("Speicher: einzelne Löschungen gehen ohne Rückfrage durch") {
+    let ordner = FileManager.default.temporaryDirectory
+        .appendingPathComponent("textschleuse-pruefung-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: ordner) }
+    let speicher = Speicher(ordner: ordner, schluesselquelle: FesterSchluessel())
+
+    var buch = Woerterbuch()
+    var kennungen: [UUID] = []
+    for nummer in 1...10 { kennungen.append(buch.anlegen(text: "Person \(nummer)", kategorie: .person).id) }
+    do {
+        try speicher.sichern(buch)
+        // Vier von zehn löschen: unangenehm, aber Alltag. Erst unter der
+        // Hälfte wird nachgefragt.
+        for kennung in kennungen.prefix(4) { buch.loeschen(kennung) }
+        try speicher.sichern(buch)
+        Pruefstand.gleich((try? speicher.laden())?.eintraege.count, 6, "sechs übrig, ohne Rückfrage")
+    } catch {
+        Pruefstand.wahr(false, "löschen ohne Fehler (\(error))")
+    }
+}
+
+Pruefstand.pruefe("Speicher: räumt alte Sicherungen weg") {
+    let ordner = FileManager.default.temporaryDirectory
+        .appendingPathComponent("textschleuse-pruefung-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: ordner) }
+    let speicher = Speicher(ordner: ordner, schluesselquelle: FesterSchluessel())
+
+    var buch = Woerterbuch()
+    _ = buch.anlegen(text: "Erste Person", kategorie: .person)
+    do {
+        try speicher.sichern(buch)
+        for nummer in 2...(Speicher.sicherungenBehalten + 5) {
+            _ = buch.anlegen(text: "Person \(nummer)", kategorie: .person)
+            try speicher.sichern(buch)
+        }
+    } catch {
+        Pruefstand.wahr(false, "wiederholtes Sichern ohne Fehler (\(error))")
+        return
+    }
+    // Beide Richtungen: nicht mehr als erlaubt, aber auch nicht bloß eine.
+    // Ohne Millisekunden im Namen fielen alle Sicherungen derselben Sekunde
+    // zusammen und der Deckel wäre trivial eingehalten.
+    Pruefstand.gleich(
+        speicher.sicherungen().count,
+        Speicher.sicherungenBehalten,
+        "genau \(Speicher.sicherungenBehalten) Sicherungen bleiben liegen"
+    )
+}
+
 Pruefstand.bilanzUndEnde()
