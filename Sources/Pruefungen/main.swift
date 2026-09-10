@@ -603,26 +603,64 @@ Pruefstand.pruefe("Markierung: Nachsuchen ohne Wörterbuch") {
 }
 
 Pruefstand.pruefe("Markierung: Nachsuchen achtet Verworfenes") {
+    // Ein verworfener Begriff darf nicht durch die Hintertür zurückkommen,
+    // wenn ein *anderer* Begriff nachgesucht wird.
+    let text = "Ilse Bergkamp kam. Bergkamp unterschrieb. Nordlicht läuft."
+    var analyse = Schleuse.analysiere(text, woerterbuch: Woerterbuch())
+    let nsText = text as NSString
+
+    // „Bergkamp" allein ausdrücklich ablehnen.
+    guard let kurzform = Schleuse.markiere(
+        bereich: NSRange(location: nsText.range(of: "Bergkamp unterschrieb").location, length: 8),
+        als: .person,
+        merken: false,
+        in: &analyse
+    ) else {
+        Pruefstand.wahr(false, "Kurzform markiert")
+        return
+    }
+    Schleuse.verwerfe(fundId: kurzform, in: &analyse)
+
+    // Jetzt die volle Nennung merken. Ihr Nachsuchen darf die abgelehnte
+    // Kurzform nicht wiederbeleben — das ist ein anderer Begriff.
+    guard let voll = analyse.funde.first(where: { $0.text == "Ilse Bergkamp" }) else {
+        Pruefstand.wahr(false, "volle Nennung gefunden")
+        return
+    }
+    Schleuse.bestaetige(fundId: voll.id, als: .person, in: &analyse)
+
+    Pruefstand.enthaelt(
+        Schleuse.geschuetzterText(analyse), "Bergkamp unterschrieb",
+        "die abgelehnte Kurzform bleibt Klartext"
+    )
+    Pruefstand.enthaeltNicht(
+        Schleuse.geschuetzterText(analyse), "Ilse Bergkamp",
+        "die volle Nennung ist geschützt"
+    )
+}
+
+Pruefstand.pruefe("Markierung widerruft ein vorheriges Verwerfen") {
+    // Derselbe Begriff, andere Meinung: wer ihn nach dem Verwerfen
+    // ausdrücklich markiert, hat es sich anders überlegt.
     let text = "Nordlicht läuft. Nordlicht ist wichtig. Nordlicht endet."
     var analyse = Schleuse.analysiere(text, woerterbuch: Woerterbuch())
     let nsText = text as NSString
 
-    // Am zweiten Vorkommen ausdrücklich Nein sagen …
-    let zweites = nsText.range(of: "Nordlicht", options: [], range: NSRange(location: 17, length: nsText.length - 17))
-    guard let vorher = Schleuse.markiere(bereich: zweites, als: .begriff, merken: false, in: &analyse) else {
+    guard let erste = Schleuse.markiere(
+        bereich: nsText.range(of: "Nordlicht"),
+        als: .begriff,
+        merken: false,
+        in: &analyse
+    ) else {
         Pruefstand.wahr(false, "Markierung angelegt")
         return
     }
-    Schleuse.verwerfe(fundId: vorher, in: &analyse)
+    Schleuse.verwerfe(fundId: erste, in: &analyse)
+    Pruefstand.gleich(analyse.aktiveFunde.count, 0, "alle drei sind draußen")
 
-    // … und dann das erste markieren.
     Schleuse.markiere(bereich: nsText.range(of: "Nordlicht"), als: .begriff, merken: true, in: &analyse)
-
-    Pruefstand.gleich(analyse.aktiveFunde.count, 2, "erstes und drittes Vorkommen, nicht das verworfene")
-    Pruefstand.enthaelt(
-        Schleuse.geschuetzterText(analyse), "Nordlicht ist wichtig",
-        "die verworfene Stelle bleibt Klartext"
-    )
+    Pruefstand.gleich(analyse.aktiveFunde.count, 3, "und alle drei wieder drin")
+    Pruefstand.enthaeltNicht(Schleuse.geschuetzterText(analyse), "Nordlicht", "kein Klartext übrig")
 }
 
 Pruefstand.pruefe("Bestätigen: der ganze Text wird nachdurchsucht") {
@@ -1142,6 +1180,77 @@ Pruefstand.pruefe("Vornamen: keine Fachwörter") {
     Pruefstand.gleich(funde.count, 0,
                       "im Fachtext keine Vermutung"
                         + (funde.isEmpty ? "" : ": \(funde.map(\.text).joined(separator: ", "))"))
+}
+
+Pruefstand.pruefe("Verwerfen gilt für alle gleichlautenden Stellen") {
+    let text = """
+        Sally hat angerufen. Später schrieb Sally noch eine Mail. \
+        Bitte an Sally weiterleiten, sie erreicht man unter a@b.de.
+        """
+    var analyse = Schleuse.analysiere(text, woerterbuch: Woerterbuch())
+    guard let erste = Schleuse.markiere(
+        bereich: (text as NSString).range(of: "Sally"),
+        als: .person,
+        merken: false,
+        in: &analyse
+    ) else {
+        Pruefstand.wahr(false, "Markierung angelegt")
+        return
+    }
+    Pruefstand.gleich(analyse.aktiveFunde.filter { $0.text == "Sally" }.count, 3,
+                      "alle drei Vorkommen sind Fundstellen")
+
+    let betroffen = Schleuse.verwerfe(fundId: erste, in: &analyse)
+    Pruefstand.gleich(betroffen, 3, "ein Verwerfen erwischt alle drei")
+    Pruefstand.gleich(analyse.aktiveFunde.filter { $0.text == "Sally" }.count, 0,
+                      "keine davon wird noch ersetzt")
+
+    let geschuetzt = Schleuse.geschuetzterText(analyse)
+    Pruefstand.gleich(geschuetzt.components(separatedBy: "Sally").count - 1, 3,
+                      "Sally steht dreimal im Klartext")
+    Pruefstand.enthaeltNicht(geschuetzt, "a@b.de", "die Adresse bleibt trotzdem geschützt")
+}
+
+Pruefstand.pruefe("Verwerfen: andere Schreibweise bleibt") {
+    let text = "Sally kam. sally schrieb. Sallys Antrag liegt vor."
+    var analyse = Schleuse.analysiere(text, woerterbuch: Woerterbuch())
+    guard let erste = Schleuse.markiere(
+        bereich: (text as NSString).range(of: "Sally"),
+        als: .person,
+        merken: false,
+        in: &analyse
+    ) else {
+        Pruefstand.wahr(false, "Markierung angelegt")
+        return
+    }
+
+    Schleuse.verwerfe(fundId: erste, in: &analyse)
+    // „Sally" und „sally" sind dasselbe Wort, „Sallys" ist eine gebeugte Form
+    // und damit eine eigene Fundstelle.
+    let uebrig = analyse.aktiveFunde.map(\.text)
+    Pruefstand.falsch(uebrig.contains("Sally"), "Sally ist raus")
+    Pruefstand.falsch(uebrig.contains("sally"), "sally auch, Großschreibung ist egal")
+}
+
+Pruefstand.pruefe("Verwerfen lässt sich zurücknehmen") {
+    let text = "Sally kam. Sally ging."
+    var analyse = Schleuse.analysiere(text, woerterbuch: Woerterbuch())
+    guard let erste = Schleuse.markiere(
+        bereich: (text as NSString).range(of: "Sally"),
+        als: .person,
+        merken: false,
+        in: &analyse
+    ) else {
+        Pruefstand.wahr(false, "Markierung angelegt")
+        return
+    }
+
+    Schleuse.verwerfe(fundId: erste, in: &analyse)
+    Pruefstand.gleich(analyse.aktiveFunde.count, 0, "beide verworfen")
+
+    let zurueck = Schleuse.behalte(fundId: erste, in: &analyse)
+    Pruefstand.gleich(zurueck, 2, "beide zurückgeholt")
+    Pruefstand.enthaeltNicht(Schleuse.geschuetzterText(analyse), "Sally", "und wieder geschützt")
 }
 
 Pruefstand.bilanzUndEnde()

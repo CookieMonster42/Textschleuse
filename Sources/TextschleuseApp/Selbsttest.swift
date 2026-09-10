@@ -40,6 +40,7 @@ enum Selbsttest {
         fehler += pruefePfeiltasten()
         fehler += pruefeWoerterbuchDaneben()
         fehler += pruefeEinstellungen()
+        fehler += pruefeWeiterspringen()
 
         print("")
         print(fehler == 0 ? "Alles in Ordnung." : "\(fehler) Punkt(e) fehlgeschlagen.")
@@ -1332,6 +1333,62 @@ enum Selbsttest {
             }
         }
         _ = text
+        return fehler
+    }
+
+    /// Nach einer Entscheidung muss es zur nächsten offenen Stelle *dahinter*
+    /// gehen, nicht zurück an den Anfang.
+    private static func pruefeWeiterspringen() -> Int {
+        var fehler = 0
+        let text = """
+            Anna Beispiel schrieb an Bernd Beispiel. Später meldete sich \
+            Clara Beispiel, danach Doris Beispiel.
+            """
+        let analyse = Schleuse.analysiere(text, woerterbuch: Woerterbuch())
+        let ansicht = SchutzAnsicht(analyse: analyse)
+        let fenster = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1000, height: 640),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        fenster.contentView = ansicht
+        fenster.makeKeyAndOrderFront(nil)
+        fenster.layoutIfNeeded()
+        defer { fenster.orderOut(nil) }
+
+        let offeneAmAnfang = ansicht.analyse.ungeprueft.count
+        guard offeneAmAnfang >= 3 else {
+            print("✗ Weiterspringen: nur \(offeneAmAnfang) offene Stellen im Probetext")
+            return 1
+        }
+
+        // Zur zweiten offenen Stelle gehen und sie entscheiden.
+        ansicht.fokussiereFundstellen()
+        _ = ansicht.pfeilFuerPruefung(runter: true)
+        let zweite = ansicht.ausgewaehlterFundFuerPruefung()
+        let stelleVorher = ansicht.analyse.funde.first { $0.id == zweite }?.bereich.location ?? -1
+
+        _ = ansicht.tasteFuerPruefung("1")
+        ansicht.decknameUebernehmenFuerPruefung()
+
+        let danach = ansicht.ausgewaehlterFundFuerPruefung()
+        let stelleDanach = ansicht.analyse.funde.first { $0.id == danach }?.bereich.location ?? -1
+
+        if stelleDanach > stelleVorher {
+            print("✓ Weiterspringen: nach ⏎ geht es vorwärts (Zeichen \(stelleVorher) → \(stelleDanach))")
+        } else {
+            print("✗ Weiterspringen: es geht zurück oder bleibt stehen "
+                + "(\(stelleVorher) → \(stelleDanach))")
+            fehler += 1
+        }
+
+        if ansicht.analyse.funde.first(where: { $0.id == danach })?.brauchtPruefung == true {
+            print("✓ Weiterspringen: die neue Stelle ist eine offene")
+        } else {
+            print("✗ Weiterspringen: gelandet auf einer schon entschiedenen Stelle")
+            fehler += 1
+        }
         return fehler
     }
 
