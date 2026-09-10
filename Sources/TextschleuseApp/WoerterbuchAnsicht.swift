@@ -157,14 +157,27 @@ final class WoerterbuchAnsicht: NSView {
 
         zaehler.font = .systemFont(ofSize: 11)
         zaehler.textColor = .secondaryLabelColor
+        // Der Zähler ist Beiwerk. Er darf die Spalte nicht auseinanderziehen,
+        // lieber verliert er sein Ende.
+        zaehler.lineBreakMode = .byTruncatingTail
+        zaehler.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
+        // Die ausgeschriebenen Titel drücken die Leiste auf 540 Punkte und
+        // damit die ganze Spalte im Hauptfenster. Schmal heißt kurz; was der
+        // Knopf tut, sagt der Tooltip.
         let loeschen = NSButton(title: "Löschen", target: self, action: #selector(loescheAuswahl))
         let autoLeeren = NSButton(
-            title: "Automatisch erkannte leeren",
+            title: schmal ? "Auto leeren" : "Automatisch erkannte leeren",
             target: self,
             action: #selector(leereAutomatische)
         )
-        let exportieren = NSButton(title: "Klartext-Export …", target: self, action: #selector(exportiere))
+        autoLeeren.toolTip = "Automatisch erkannte Einträge löschen"
+        let exportieren = NSButton(
+            title: schmal ? "Export …" : "Klartext-Export …",
+            target: self,
+            action: #selector(exportiere)
+        )
+        exportieren.toolTip = "Klartext-Export, unverschlüsselt"
         for knopf in [loeschen, autoLeeren, exportieren] {
             knopf.bezelStyle = .rounded
         }
@@ -174,10 +187,18 @@ final class WoerterbuchAnsicht: NSView {
         knopfleiste.spacing = 8
         knopfleiste.translatesAutoresizingMaskIntoConstraints = false
 
-        let hinweis = NSTextField(labelWithString:
-            "Gelöschte Nummern werden nicht neu vergeben. Der Klartext-Export ist unverschlüsselt.")
+        // In einer Zeile ist der Satz 490 Punkte breit und legt damit die
+        // Mindestbreite der ganzen Spalte fest. Schmal darf er umbrechen.
+        let hinweistext = "Gelöschte Nummern werden nicht neu vergeben. "
+            + "Der Klartext-Export ist unverschlüsselt."
+        let hinweis = schmal
+            ? NSTextField(wrappingLabelWithString: hinweistext)
+            : NSTextField(labelWithString: hinweistext)
         hinweis.font = .systemFont(ofSize: 11)
         hinweis.textColor = .secondaryLabelColor
+        // Ohne diese Vorgabe rechnet ein umbrechendes Feld seine Wunschbreite
+        // als eine einzige Zeile aus — und die wären hier 469 Punkte.
+        if schmal { hinweis.preferredMaxLayoutWidth = 320 }
 
         aufloesungZeile.font = .systemFont(ofSize: 12)
         aufloesungZeile.isHidden = true
@@ -243,18 +264,22 @@ final class WoerterbuchAnsicht: NSView {
 
         NSLayoutConstraint.activate([
             mitte.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -32),
-            mitte.heightAnchor.constraint(greaterThanOrEqualToConstant: schmal ? 340 : 380),
+            mitte.heightAnchor.constraint(greaterThanOrEqualToConstant: schmal ? 240 : 380),
             knopfleiste.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -32),
+            hinweis.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -32),
             suchfeld.widthAnchor.constraint(equalTo: spalteAlle.widthAnchor),
             rollflaeche.widthAnchor.constraint(equalTo: spalteAlle.widthAnchor),
             rolleImText.widthAnchor.constraint(equalTo: spalteImText.widthAnchor),
             aufloesungZeile.widthAnchor.constraint(equalTo: spalteAlle.widthAnchor),
 
-            // Ohne diese Maße bleibt von den Listen nichts übrig.
+            // Ohne diese Maße bleibt von den Listen nichts übrig. Schmal
+            // stehen Listen und Editor untereinander — dort müssen die Maße
+            // kleiner sein, sonst fordert die Spalte 809 Punkte Höhe und das
+            // Hauptfenster passt auf kein 13-Zoll-Bild mehr.
             links.widthAnchor.constraint(equalTo: mitte.widthAnchor),
-            links.heightAnchor.constraint(greaterThanOrEqualToConstant: 380),
-            rollflaeche.heightAnchor.constraint(greaterThanOrEqualToConstant: 200),
-            rolleImText.heightAnchor.constraint(greaterThanOrEqualToConstant: 200),
+            links.heightAnchor.constraint(greaterThanOrEqualToConstant: schmal ? 240 : 380),
+            rollflaeche.heightAnchor.constraint(greaterThanOrEqualToConstant: schmal ? 150 : 200),
+            rolleImText.heightAnchor.constraint(greaterThanOrEqualToConstant: schmal ? 150 : 200),
             rollflaeche.bottomAnchor.constraint(equalTo: spalteAlle.bottomAnchor),
             rolleImText.bottomAnchor.constraint(equalTo: spalteImText.bottomAnchor),
             schmal
@@ -312,7 +337,9 @@ final class WoerterbuchAnsicht: NSView {
         let anzahl = woerterbuch.eintraege.count
         let automatisch = woerterbuch.eintraege.filter(\.automatischErkannt).count
         zaehler.stringValue = filter.isEmpty
-            ? "\(anzahl) Einträge, davon \(automatisch) automatisch erkannt"
+            ? (schmal
+                ? "\(anzahl) Einträge, \(automatisch) automatisch"
+                : "\(anzahl) Einträge, davon \(automatisch) automatisch erkannt")
             : "\(Set(zeilen.map(\.eintragId)).count) von \(anzahl) Einträgen"
 
         beschrifteAufloesung()

@@ -86,13 +86,18 @@ final class Hauptfenster: NSWindowController {
         self.beimZurueckdrehen = beimZurueckdrehen
 
         let fenster = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1620, height: 780),
+            contentRect: NSRect(origin: .zero, size: Hauptfenster.startgroesse()),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         fenster.title = "Textschleuse"
-        fenster.setFrameAutosaveName("textschleuse.hauptfenster")
+        // Das ist kein Wunschwert, sondern das, was das Layout wirklich
+        // hergibt: Arbeitsfläche 700, Wörterbuchspalte 400, Ränder.
+        fenster.minSize = NSSize(width: 1200, height: 720)
+        // Neuer Name, weil die alte gemerkte Größe 1620 breit war und den
+        // Bildschirm gefüllt hat. Unter dem alten Namen käme sie zurück.
+        fenster.setFrameAutosaveName("textschleuse.hauptfenster.2")
         fenster.center()
         super.init(window: fenster)
 
@@ -103,6 +108,22 @@ final class Hauptfenster: NSWindowController {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("nicht unterstützt") }
+
+    /// Wunschmaß, aber nie größer als der Bildschirm hergibt. Ein Fenster, das
+    /// beim Öffnen alles verdeckt, zwingt dich zum Verkleinern, bevor du
+    /// arbeiten kannst.
+    static func startgroesse(
+        auf sichtbar: NSRect? = nil
+    ) -> NSSize {
+        let flaeche = sichtbar ?? NSScreen.main?.visibleFrame
+            ?? NSRect(x: 0, y: 0, width: 1440, height: 860)
+        return NSSize(
+            width: max(1200, min(1240, flaeche.width - 160)),
+            // Die Höhe darf großzügiger sein als die Breite: davon lebt die
+            // Wörterbuchliste, und zu breit war das Fenster, nicht zu hoch.
+            height: max(720, min(820, flaeche.height - 100))
+        )
+    }
 
     private func baueOberflaeche() {
         schutzEingabe.beiAusloesen = { [weak self] text in self?.pruefe(text) }
@@ -165,6 +186,8 @@ final class Hauptfenster: NSWindowController {
         trenner.translatesAutoresizingMaskIntoConstraints = false
 
         let inhalt = NSView()
+        let anteil = spalte.widthAnchor.constraint(equalTo: inhalt.widthAnchor, multiplier: 0.33)
+        anteil.priority = .defaultHigh
         inhalt.addSubview(verlaufZeile)
         inhalt.addSubview(reiter)
         inhalt.addSubview(trenner)
@@ -188,7 +211,11 @@ final class Hauptfenster: NSWindowController {
             spalte.topAnchor.constraint(equalTo: inhalt.topAnchor, constant: 12),
             spalte.trailingAnchor.constraint(equalTo: inhalt.trailingAnchor, constant: -12),
             spalte.bottomAnchor.constraint(equalTo: inhalt.bottomAnchor, constant: -12),
-            spalte.widthAnchor.constraint(equalToConstant: 540),
+            // Ein Drittel statt starrer 540 Punkte: bei einem schmaleren
+            // Fenster bliebe für den Text sonst kaum etwas übrig.
+            spalte.widthAnchor.constraint(greaterThanOrEqualToConstant: 380),
+            spalte.widthAnchor.constraint(lessThanOrEqualToConstant: 560),
+            anteil,
         ])
         window?.contentView = inhalt
     }
