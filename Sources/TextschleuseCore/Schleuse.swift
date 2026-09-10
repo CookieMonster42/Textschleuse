@@ -263,7 +263,15 @@ public enum Schleuse {
         guard geputzt.length > 0 else { return nil }
 
         let text = nsText.substring(with: geputzt)
-        analyse.funde.removeAll { NSIntersectionRange($0.bereich, geputzt).length > 0 }
+
+        // Weg mit allem, was hier liegt — und mit jeder anderen Stelle, an der
+        // dasselbe steht. Wer einen Begriff ausdrücklich markiert, sagt damit
+        // etwas über den Begriff, nicht über diese eine Stelle. Hatte er ihn
+        // vorher verworfen, ist das hiermit widerrufen.
+        let gesucht = text.lowercased()
+        analyse.funde.removeAll {
+            NSIntersectionRange($0.bereich, geputzt).length > 0 || $0.text.lowercased() == gesucht
+        }
 
         var fund = Fund(
             bereich: geputzt,
@@ -583,10 +591,51 @@ public enum Schleuse {
         }
     }
 
-    /// Wirft einen Fund raus. Der Klartext bleibt dann im Ergebnis stehen.
-    public static func verwerfe(fundId: UUID, in analyse: inout Analyse) {
-        guard let index = analyse.funde.firstIndex(where: { $0.id == fundId }) else { return }
-        analyse.funde[index].verworfen = true
+    /// Wirft einen Fund raus — und mit ihm jede andere Stelle, an der genau
+    /// dasselbe steht.
+    ///
+    /// „Sally ist in diesem Text kein Name" gilt für den ganzen Text. Alles
+    /// andere wäre Handarbeit an jedem einzelnen Vorkommen, und beim
+    /// dreizehnten übersieht man eines.
+    ///
+    /// Groß- und Kleinschreibung ist dabei egal, die Schreibweise nicht: „Jan
+    /// Maia" trifft nicht „Jan  Maia" mit zwei Leerzeichen. Wer die auch
+    /// loswerden will, verwirft sie einzeln — sie ist ja auch eine eigene
+    /// Fundstelle.
+    @discardableResult
+    public static func verwerfe(fundId: UUID, in analyse: inout Analyse) -> Int {
+        guard let fund = analyse.funde.first(where: { $0.id == fundId }) else { return 0 }
+        let gesucht = fund.text.lowercased()
+
+        var betroffen = 0
+        for index in analyse.funde.indices
+        where analyse.funde[index].text.lowercased() == gesucht && !analyse.funde[index].verworfen {
+            analyse.funde[index].verworfen = true
+            // Eine verworfene Stelle braucht keine Sitzungszuordnung mehr; ihr
+            // Platzhalter taucht im Ergebnis gar nicht auf.
+            if analyse.funde[index].eintragId == nil {
+                analyse.unbekannte.removeValue(forKey: analyse.funde[index].platzhalter)
+            }
+            betroffen += 1
+        }
+        return betroffen
+    }
+
+    /// Nimmt das Verwerfen zurück, ebenfalls für alle gleichlautenden Stellen.
+    @discardableResult
+    public static func behalte(fundId: UUID, in analyse: inout Analyse) -> Int {
+        guard let fund = analyse.funde.first(where: { $0.id == fundId }) else { return 0 }
+        let gesucht = fund.text.lowercased()
+        var betroffen = 0
+        for index in analyse.funde.indices
+        where analyse.funde[index].text.lowercased() == gesucht && analyse.funde[index].verworfen {
+            analyse.funde[index].verworfen = false
+            if analyse.funde[index].eintragId == nil {
+                analyse.unbekannte[analyse.funde[index].platzhalter] = analyse.funde[index].text
+            }
+            betroffen += 1
+        }
+        return betroffen
     }
 
     // MARK: Ergebnis

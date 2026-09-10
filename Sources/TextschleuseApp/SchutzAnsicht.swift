@@ -733,8 +733,14 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
     private func verwerfeAktuellen() {
         guard let fund = aktuellerFund else { return }
         merkeStand("Verwerfen")
-        Schleuse.verwerfe(fundId: fund.id, in: &analyse)
+        let betroffen = Schleuse.verwerfe(fundId: fund.id, in: &analyse)
         aktualisiere()
+
+        meldung.textColor = .secondaryLabelColor
+        meldung.stringValue = betroffen > 1
+            ? "„\(fund.text)" + "\" bleibt an allen \(betroffen) Stellen im Klartext. ⌘Z nimmt das zurück."
+            : "„\(fund.text)" + "\" bleibt im Klartext. ⌘Z nimmt das zurück."
+        meldung.isHidden = false
     }
 
     // MARK: Wörterbuch-Klappe
@@ -954,6 +960,7 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
     func vorschauUmschaltenFuerPruefung() { vorschauUmschalten() }
     func waehleFundFuerPruefung(_ kennung: UUID) { waehleFund(kennung) }
     func ausgewaehlterFundFuerPruefung() -> UUID? { aktuellerFund?.id }
+    func decknameUebernehmenFuerPruefung() { decknameUebernehmen() }
     @discardableResult
     func fokussiereTextFuerPruefung() -> Bool {
         window?.makeFirstResponder(textAnsicht) ?? false
@@ -1144,17 +1151,33 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
         window?.makeFirstResponder(textAnsicht)
     }
 
-    /// Nach einer Entscheidung zur nächsten offenen Vermutung springen. Wenn
-    /// keine mehr da ist, bleibt die Auswahl stehen.
+    /// Springt zur nächsten offenen Stelle *hinter* der aktuellen.
+    ///
+    /// Vorher war es immer die erste offene im Text. Wer sich von oben nach
+    /// unten durcharbeitet, landete damit nach jeder Entscheidung wieder am
+    /// Anfang und musste sich erneut nach unten hangeln.
+    ///
+    /// Ist hinter der aktuellen nichts mehr offen, geht es einmal um: dann
+    /// steht vorne noch etwas, das übersprungen wurde.
     private func weiterZurNaechstenLuecke() {
+        let bisher = aktuellerFund?.bereich.location ?? -1
         aktualisiere()
+
         let offene = analyse.funde
             .filter(\.brauchtPruefung)
             .sorted { $0.bereich.location < $1.bereich.location }
-        if let naechste = offene.first, let index = reihenfolge.firstIndex(of: naechste.id) {
-            auswahl = index
-            aktualisiere()
+        guard !offene.isEmpty else { return }
+
+        let naechste = offene.first { $0.bereich.location > bisher } ?? offene[0]
+        guard let index = reihenfolge.firstIndex(of: naechste.id) else { return }
+        auswahl = index
+        aktualisiere()
+        if let bereich = bereiche[naechste.id], NSMaxRange(bereich) <= textAnsicht.string.count {
+            textAnsicht.setSelectedRange(bereich)
         }
+        // Zurück in die Liste: dort greifen die Pfeiltasten und die Ziffern
+        // sofort weiter.
+        fokussiereFundstellen()
     }
 
     func uebernehmen(merken: Bool) {
