@@ -64,14 +64,24 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
     var beiWoerterbuchAenderung: ((Woerterbuch) -> Void)?
     private var mitte = NSStackView()
 
+    /// Zwei Reihen übereinander: oben die Kategorien und das Kopieren, unten
+    /// die Werkzeuge. In einer Reihe wären es fünfzehn Knöpfe und 1270 Punkte
+    /// Mindestbreite — daran hing bisher die Fensterbreite.
     private let knopfleiste = NSStackView()
+    private let knopfreiheOben = NSStackView()
+    private let knopfreiheUnten = NSStackView()
+    /// Die Knöpfe, die eine ausgewählte Fundstelle brauchen. Kopieren, Leeren
+    /// oder Suchen gehören nicht dazu — die gehen immer.
+    private var stellenKnoepfe: [NSButton] = []
     private let originalFeld = NSTextField()
     private let originalEtikett = NSTextField(labelWithString: "Original")
     private let decknameFeld = NSTextField()
     private let decknameEtikett = NSTextField(labelWithString: "Deckname")
     private let merkenHaken = NSButton(checkboxWithTitle: "dauerhaft merken", target: nil, action: nil)
     private let meldung = NSTextField(labelWithString: "")
-    private let fusszeile = NSTextField(labelWithString: "")
+    /// Die Tastenlegende. Umbrechend, nicht einzeilig: in einer Zeile ist sie
+    /// 1200 Punkte breit und zwingt das ganze Fenster auf diese Breite.
+    private let fusszeile = NSTextField(wrappingLabelWithString: "")
 
     init(analyse: Analyse) {
         self.analyse = analyse
@@ -135,8 +145,16 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
             self.window?.makeFirstResponder(self.textAnsicht)
         }
 
-        knopfleiste.orientation = .horizontal
+        for reihe in [knopfreiheOben, knopfreiheUnten] {
+            reihe.orientation = .horizontal
+            reihe.spacing = 6
+            reihe.alignment = .centerY
+        }
+        knopfleiste.orientation = .vertical
         knopfleiste.spacing = 6
+        knopfleiste.alignment = .leading
+        knopfleiste.addArrangedSubview(knopfreiheOben)
+        knopfleiste.addArrangedSubview(knopfreiheUnten)
         baueKnoepfe()
 
         originalEtikett.font = .systemFont(ofSize: 11)
@@ -170,6 +188,7 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
 
         fusszeile.font = .systemFont(ofSize: 11)
         fusszeile.textColor = .secondaryLabelColor
+        fusszeile.preferredMaxLayoutWidth = 620
         fusszeile.stringValue = "1–5 Kategorie, dann Deckname tippen und ⏎ · ⏎ im Text Kopieren · "
             + "⌘⏎ Kopieren und alles merken · ↑ ↓ Fundstelle · ⌫ Verwerfen · G Zur Gruppe · "
             + "⌘E Text bearbeiten · ⌘F Suchen · ⌘N Neuer Text · ⎋ Abbrechen"
@@ -237,18 +256,21 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
 
         NSLayoutConstraint.activate([
             mitte.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
-            mitte.heightAnchor.constraint(greaterThanOrEqualToConstant: 260),
+            mitte.heightAnchor.constraint(greaterThanOrEqualToConstant: 200),
             liste.widthAnchor.constraint(equalToConstant: 260),
             decknameZeile.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
             kopfzeileMitKlappe.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
             suche.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
+            fusszeile.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
             decknameFeld.widthAnchor.constraint(greaterThanOrEqualToConstant: 150),
             originalFeld.widthAnchor.constraint(greaterThanOrEqualToConstant: 170),
         ])
     }
 
     private func baueKnoepfe() {
-        knopfleiste.setViews([], in: .leading)
+        knopfreiheOben.setViews([], in: .leading)
+        knopfreiheUnten.setViews([], in: .leading)
+        stellenKnoepfe = []
         for (index, kategorie) in Kategorie.schnellwahl.enumerated() {
             let knopf = NSButton(
                 title: "\(kategorie.anzeigename) (\(index + 1))",
@@ -259,7 +281,8 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
             knopf.bezelStyle = .rounded
             knopf.controlSize = .small
             knopf.toolTip = "Text markieren, dann \(index + 1) drücken — oder ⌘\(index + 1) ohne Markierung"
-            knopfleiste.addArrangedSubview(knopf)
+            knopfreiheOben.addArrangedSubview(knopf)
+            stellenKnoepfe.append(knopf)
         }
 
         let kopieren = NSButton(title: "Geschützten Text kopieren", target: self, action: #selector(kopierenGeklickt))
@@ -268,7 +291,7 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
         kopieren.keyEquivalent = "\r"
         kopieren.keyEquivalentModifierMask = [.command]
         kopieren.toolTip = "⌘⏎ macht dasselbe und merkt dabei alle offenen Vermutungen"
-        knopfleiste.addArrangedSubview(kopieren)
+        knopfreiheOben.addArrangedSubview(kopieren)
 
         let verwerfen = NSButton(title: "Verwerfen", target: self, action: #selector(verwerfenGeklickt))
         verwerfen.toolTip = "Diese Stelle bleibt im Klartext stehen"
@@ -295,8 +318,12 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
         ] {
             knopf.bezelStyle = .rounded
             knopf.controlSize = .small
-            knopfleiste.addArrangedSubview(knopf)
+            knopfreiheUnten.addArrangedSubview(knopf)
         }
+        // Nur diese vier hängen an einer ausgewählten Stelle. Kopieren,
+        // Suchen, Leeren und Neuer Text gingen vorher auch nicht, solange
+        // nichts ausgewählt war — das war keine Absicht.
+        stellenKnoepfe.append(contentsOf: [verwerfen, gruppe, zurueckKnopf, vorKnopf])
     }
 
     // MARK: Darstellung
@@ -399,8 +426,7 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
 
     private func aktualisiereWerkzeuge() {
         let fund = aktuellerFund
-        for ansicht in knopfleiste.arrangedSubviews {
-            guard let knopf = ansicht as? NSButton else { continue }
+        for knopf in stellenKnoepfe {
             if knopf.title.hasPrefix("Gehört zu") {
                 // Geht auch ohne Vorschlag: du weißt oft besser als die
                 // Heuristik, wer gemeint ist.

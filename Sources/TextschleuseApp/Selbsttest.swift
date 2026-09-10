@@ -41,6 +41,8 @@ enum Selbsttest {
         fehler += pruefeWoerterbuchDaneben()
         fehler += pruefeEinstellungen()
         fehler += pruefeWeiterspringen()
+        fehler += pruefeFenstergroesse()
+        fehler += pruefeZuordnungsliste()
 
         print("")
         print(fehler == 0 ? "Alles in Ordnung." : "\(fehler) Punkt(e) fehlgeschlagen.")
@@ -1198,6 +1200,172 @@ enum Selbsttest {
         return fehler
     }
 
+    /// Das Hauptfenster darf den Bildschirm nicht ausfüllen. Gemessen wird das
+    /// fertige Fenster, nicht der Wunschwert — die gemerkte Größe aus einer
+    /// früheren Sitzung könnte ihn überschreiben.
+    private static func pruefeFenstergroesse() -> Int {
+        var fehler = 0
+
+        // Rechnerisch, mit einem kleinen Bildschirm: 1280 wären dort zu viel.
+        let klein = NSRect(x: 0, y: 0, width: 1440, height: 860)
+        let passend = Hauptfenster.startgroesse(auf: klein)
+        if passend.width <= klein.width - 100 && passend.height <= klein.height - 100 {
+            print("✓ Fenstergröße: auf 1440×860 bleibt Rand (\(Int(passend.width))×\(Int(passend.height)))")
+        } else {
+            print("✗ Fenstergröße: auf 1440×860 zu groß (\(Int(passend.width))×\(Int(passend.height)))")
+            fehler += 1
+        }
+
+        let winzig = Hauptfenster.startgroesse(auf: NSRect(x: 0, y: 0, width: 700, height: 400))
+        if winzig.width >= 1200 {
+            print("✓ Fenstergröße: unter die Mindestbreite geht es nicht")
+        } else {
+            print("✗ Fenstergröße: unter 1200 gerutscht (\(Int(winzig.width)))")
+            fehler += 1
+        }
+
+        // Und in echt, auf diesem Bildschirm — mit einem geladenen Text, denn
+        // erst die Arbeitsfläche bringt ihre eigenen Mindestmaße mit und
+        // konnte das Fenster früher auf 1887 Punkte aufblasen.
+        let sitzung = Sitzung()
+        sitzung.beginne(Schleuse.analysiere(
+            "Sehr geehrter Herr Nyström, Ihre IBAN DE89 3704 0044 0532 0130 00 stimmt.",
+            woerterbuch: Woerterbuch()
+        ))
+        let haupt = Hauptfenster(
+            woerterbuch: { Woerterbuch() },
+            sitzung: sitzung,
+            beimSchuetzen: { _, _ in },
+            beimZurueckdrehen: { _ in }
+        )
+        haupt.window?.layoutIfNeeded()
+        defer { haupt.close() }
+        guard let fenster = haupt.window, let schirm = NSScreen.main else {
+            print("✓ Fenstergröße: kein Bildschirm vorhanden, übersprungen")
+            return fehler
+        }
+        let rahmen = fenster.frame
+        let sichtbar = schirm.visibleFrame
+        if rahmen.width <= sichtbar.width && rahmen.height <= sichtbar.height {
+            print("✓ Fenstergröße: \(Int(rahmen.width))×\(Int(rahmen.height)) passt "
+                + "auf \(Int(sichtbar.width))×\(Int(sichtbar.height))")
+        } else {
+            print("✗ Fenstergröße: \(Int(rahmen.width))×\(Int(rahmen.height)) sprengt "
+                + "\(Int(sichtbar.width))×\(Int(sichtbar.height))")
+            func breit(_ ansicht: NSView, _ tiefe: Int) {
+                let w = ansicht.fittingSize.width
+                if w > 700 {
+                    let titel = (ansicht as? NSTextField)?.stringValue.prefix(40) ?? ""
+                    print("   [Diagnose] \(String(repeating: "  ", count: tiefe))\(type(of: ansicht)) \(Int(w)) „\(titel)\"")
+                    for kind in ansicht.subviews { breit(kind, tiefe + 1) }
+                }
+            }
+            if let inhalt = fenster.contentView { breit(inhalt, 0) }
+            fehler += 1
+        }
+
+        // Und es muss sich auch auf ein 13-Zoll-Bild verkleinern lassen. Ein
+        // Mindestmaß aus den Constraints würde es wieder aufblasen.
+        fenster.setContentSize(NSSize(width: 940, height: 540))
+        fenster.layoutIfNeeded()
+        let klein13 = fenster.frame
+        if klein13.width <= 1220 && klein13.height <= 745 {
+            print("✓ Fenstergröße: lässt sich auf \(Int(klein13.width))×\(Int(klein13.height)) stauchen")
+        } else {
+            print("✗ Fenstergröße: springt auf \(Int(klein13.width))×\(Int(klein13.height)) zurück")
+            fehler += 1
+        }
+        fenster.setContentSize(rahmen.size)
+
+        // Die Wörterbuchspalte darf den Text nicht auffressen.
+        fenster.layoutIfNeeded()
+        if let spalte = fenster.contentView.flatMap({ woerterbuchSuchen(in: $0) }) {
+            let anteil = spalte.frame.width / rahmen.width
+            if anteil < 0.38 {
+                print("✓ Fenstergröße: Wörterbuch nimmt \(Int(anteil * 100)) % der Breite")
+            } else {
+                print("✗ Fenstergröße: Wörterbuch nimmt \(Int(anteil * 100)) % der Breite")
+                fehler += 1
+            }
+        }
+        return fehler
+    }
+
+    /// Die Zuordnungsliste: geclustert, alphabetisch, durchsuchbar.
+    private static func pruefeZuordnungsliste() -> Int {
+        var fehler = 0
+        let eintraege = [
+            Eintrag(text: "Zwickel GmbH", kategorie: .firma, nummer: 1),
+            Eintrag(text: "info@nordbank.de", kategorie: .email, nummer: 2),
+            Eintrag(text: "Thorben Nyström", kategorie: .person, nummer: 3),
+            Eintrag(text: "almut@nordbank.de", kategorie: .email, nummer: 4),
+            Eintrag(text: "Almut Weidenbach", kategorie: .person, nummer: 5),
+        ]
+        let waehler = ZuordnungsFenster(
+            eintraege: eintraege,
+            nennung: "A. Weidenbach",
+            vorschlag: nil
+        )
+
+        var koepfe: [String] = []
+        var namen: [String] = []
+        for zeile in waehler.zeilen {
+            switch zeile {
+            case .kopf(let kategorie, _): koepfe.append(kategorie.anzeigename)
+            case .eintrag(let eintrag): namen.append(eintrag.text)
+            }
+        }
+        if koepfe == ["Person", "Firma", "E-Mail"] {
+            print("✓ Zuordnen: drei Typblöcke in fester Reihenfolge")
+        } else {
+            print("✗ Zuordnen: Blöcke sind \(koepfe)")
+            fehler += 1
+        }
+        if namen == ["Almut Weidenbach", "Thorben Nyström", "Zwickel GmbH",
+                     "almut@nordbank.de", "info@nordbank.de"] {
+            print("✓ Zuordnen: innerhalb der Blöcke alphabetisch")
+        } else {
+            print("✗ Zuordnen: Reihenfolge ist \(namen)")
+            fehler += 1
+        }
+
+        // Nach dem Füllen muss eine Eintragszeile stehen, keine Kopfzeile —
+        // sonst liefe ⏎ ins Leere.
+        if waehler.markierterEintrag?.text == "Almut Weidenbach" {
+            print("✓ Zuordnen: die erste Eintragszeile ist vorgewählt")
+        } else {
+            print("✗ Zuordnen: vorgewählt ist \(waehler.markierterEintrag?.text ?? "nichts")")
+            fehler += 1
+        }
+
+        waehler.fuelle(suche: "nordbank")
+        let gefiltert = waehler.zeilen.compactMap { zeile -> String? in
+            if case .eintrag(let eintrag) = zeile { return eintrag.text }
+            return nil
+        }
+        if gefiltert == ["almut@nordbank.de", "info@nordbank.de"] {
+            print("✓ Zuordnen: die Suche filtert auf zwei Adressen")
+        } else {
+            print("✗ Zuordnen: gefiltert bleibt \(gefiltert)")
+            fehler += 1
+        }
+        if waehler.markierterEintrag?.text == "almut@nordbank.de" {
+            print("✓ Zuordnen: nach dem Filtern steht die Auswahl auf dem ersten Treffer")
+        } else {
+            print("✗ Zuordnen: Auswahl nach dem Filtern ist \(waehler.markierterEintrag?.text ?? "nichts")")
+            fehler += 1
+        }
+
+        waehler.fuelle(suche: "gibtesnicht")
+        if waehler.zeilen.isEmpty && waehler.markierterEintrag == nil {
+            print("✓ Zuordnen: ohne Treffer bleibt die Liste leer")
+        } else {
+            print("✗ Zuordnen: ohne Treffer stehen noch \(waehler.zeilen.count) Zeilen")
+            fehler += 1
+        }
+        return fehler
+    }
+
     /// Das Wörterbuch neben dem Text: im Hauptfenster fest, im Popup
     /// ausklappbar. Und was dort gemerkt wird, muss im Text sofort greifen.
     private static func pruefeWoerterbuchDaneben() -> Int {
@@ -1299,7 +1467,8 @@ enum Selbsttest {
                 let sichtbareHoehe = rolle?.contentView.bounds.height ?? 0
                 let zeilenSichtbar = Int(sichtbareHoehe / max(1, alleTabelle.rowHeight))
                 let spaltenBreite = spalte.frame.width
-                print("   [Diagnose] Spalte \(Int(spaltenBreite)) pt breit, "
+                print("   [Diagnose] Fenster \(Int(haupt.window?.frame.width ?? 0)) pt, "
+                    + "Spalte \(Int(spaltenBreite)) pt breit, "
                     + "Liste \(Int(rolle?.frame.width ?? 0))×\(Int(rolle?.frame.height ?? 0)), "
                     + "Ausschnitt \(Int(sichtbareHoehe)) pt = \(zeilenSichtbar) Zeilen, "
                     + "Spaltenbreite in der Tabelle \(Int(alleTabelle.tableColumns.reduce(0) { $0 + $1.width })) pt")

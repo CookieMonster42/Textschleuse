@@ -1253,4 +1253,73 @@ Pruefstand.pruefe("Verwerfen lässt sich zurücknehmen") {
     Pruefstand.enthaeltNicht(Schleuse.geschuetzterText(analyse), "Sally", "und wieder geschützt")
 }
 
+// MARK: Sortierte Eintragsliste
+
+/// Baut ein Wörterbuch mit bewusst durcheinandergewürfelter Reihenfolge.
+func gemischteEintraege() -> [Eintrag] {
+    [
+        Eintrag(text: "Zwickel GmbH", kategorie: .firma, nummer: 1),
+        Eintrag(text: "info@nordbank.de", kategorie: .email, nummer: 2),
+        Eintrag(
+            text: "Thorben Nyström",
+            kategorie: .person,
+            nummer: 3,
+            aliase: [Alias(text: "Herr Nyström", suffix: "B")]
+        ),
+        Eintrag(text: "Ärztehaus Süd", kategorie: .firma, nummer: 4),
+        Eintrag(text: "almut@nordbank.de", kategorie: .email, nummer: 5),
+        Eintrag(text: "Almut Weidenbach", kategorie: .person, nummer: 6),
+        Eintrag(text: "Aachen", kategorie: .ort, nummer: 7),
+    ]
+}
+
+Pruefstand.pruefe("Eintragsliste: nach Typ geclustert") {
+    let gruppen = Eintragsliste.gruppiert(gemischteEintraege())
+    Pruefstand.gleich(gruppen.count, 4, "vier Typen kommen vor")
+    Pruefstand.gleich(
+        gruppen.map(\.kategorie),
+        [.person, .firma, .ort, .email],
+        "Reihenfolge folgt der Kategorie-Deklaration, nicht dem Zufall"
+    )
+    Pruefstand.gleich(gruppen[3].eintraege.count, 2, "beide E-Mails im selben Block")
+}
+
+Pruefstand.pruefe("Eintragsliste: alphabetisch nach der Hauptnennung") {
+    let gruppen = Eintragsliste.gruppiert(gemischteEintraege())
+    Pruefstand.gleich(
+        gruppen[0].eintraege.map(\.text),
+        ["Almut Weidenbach", "Thorben Nyström"],
+        "A vor T"
+    )
+    // Ä muss bei A einsortiert werden und nicht hinter Z landen.
+    Pruefstand.gleich(
+        gruppen[1].eintraege.map(\.text),
+        ["Ärztehaus Süd", "Zwickel GmbH"],
+        "Ä zählt wie A"
+    )
+}
+
+Pruefstand.pruefe("Eintragsliste: Schreibweisen verschieben die Sortierung nicht") {
+    // „Herr Nyström" hängt an Thorben. Sortierte die Liste nach Aliasen mit,
+    // stünde derselbe Mensch einmal bei H und einmal bei T.
+    let gruppen = Eintragsliste.gruppiert(gemischteEintraege())
+    Pruefstand.gleich(gruppen[0].eintraege.first?.text, "Almut Weidenbach", "H taucht nicht vorne auf")
+
+    let treffer = Eintragsliste.gefiltert(gemischteEintraege(), suche: "Herr Nys")
+    Pruefstand.gleich(treffer.count, 1, "über den Alias findet man den Eintrag trotzdem")
+    Pruefstand.gleich(treffer.first?.text, "Thorben Nyström", "gefunden wird die Hauptnennung")
+}
+
+Pruefstand.pruefe("Eintragsliste: Suche ohne Rücksicht auf Umlaute und Fälle") {
+    let alle = gemischteEintraege()
+    Pruefstand.gleich(Eintragsliste.gefiltert(alle, suche: "nystrom").count, 1, "Nyström ohne Pünktchen")
+    Pruefstand.gleich(Eintragsliste.gefiltert(alle, suche: "AACHEN").count, 1, "Großschreibung egal")
+    Pruefstand.gleich(Eintragsliste.gefiltert(alle, suche: "PERSON_3").count, 1, "Deckname findet auch")
+    Pruefstand.gleich(Eintragsliste.gefiltert(alle, suche: "E-Mail").count, 2, "Typname findet den Block")
+    Pruefstand.gleich(Eintragsliste.gefiltert(alle, suche: "  ").count, alle.count, "Leerzeichen filtert nichts")
+
+    let leer = Eintragsliste.gruppiert(alle, suche: "gibtesnicht")
+    Pruefstand.gleich(leer.count, 0, "kein Treffer, keine leeren Blöcke")
+}
+
 Pruefstand.bilanzUndEnde()
