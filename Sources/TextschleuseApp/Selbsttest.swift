@@ -1284,6 +1284,35 @@ enum Selbsttest {
             let eintrag = buch.anlegen(text: "Thorben Nyström", kategorie: .person)
             _ = buch.anlegen(text: "Anna Beispiel", kategorie: .person)
             spalte.setze(woerterbuch: buch)
+
+            // Und mit vielen Einträgen: zeigt die Liste alle oder nur die
+            // ersten, die zufällig ins Fenster passen?
+            var vieles = Woerterbuch()
+            for nummer in 1...40 { _ = vieles.anlegen(text: "Person Nummer \(nummer)", kategorie: .person) }
+            spalte.setze(woerterbuch: vieles)
+            spalte.setze(imText: [])
+            haupt.window?.layoutIfNeeded()
+            let alleTabelle = tabellenSammeln(in: spalte).max { $0.numberOfRows < $1.numberOfRows }
+            if let alleTabelle, alleTabelle.numberOfRows == 40 {
+                let rolle = alleTabelle.enclosingScrollView
+                let sichtbareHoehe = rolle?.contentView.bounds.height ?? 0
+                let zeilenSichtbar = Int(sichtbareHoehe / max(1, alleTabelle.rowHeight))
+                let spaltenBreite = spalte.frame.width
+                print("   [Diagnose] Spalte \(Int(spaltenBreite)) pt breit, "
+                    + "Liste \(Int(rolle?.frame.width ?? 0))×\(Int(rolle?.frame.height ?? 0)), "
+                    + "Ausschnitt \(Int(sichtbareHoehe)) pt = \(zeilenSichtbar) Zeilen, "
+                    + "Spaltenbreite in der Tabelle \(Int(alleTabelle.tableColumns.reduce(0) { $0 + $1.width })) pt")
+                if zeilenSichtbar >= 12 {
+                    print("✓ Wörterbuch daneben: alle 40 Einträge, \(zeilenSichtbar) davon ohne Rollen sichtbar")
+                } else {
+                    print("✗ Wörterbuch daneben: nur \(zeilenSichtbar) Zeilen passen ins Bild")
+                    fehler += 1
+                }
+            } else {
+                print("✗ Wörterbuch daneben: \(alleTabelle?.numberOfRows ?? -1) von 40 Einträgen")
+                fehler += 1
+            }
+            spalte.setze(woerterbuch: buch)
             spalte.setze(imText: [])
             haupt.window?.layoutIfNeeded()
             let ohne = tabellenSammeln(in: spalte).map(\.numberOfRows).sorted()

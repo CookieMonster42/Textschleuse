@@ -142,7 +142,7 @@ final class EintragEditor: NSView {
             stapel.trailingAnchor.constraint(equalTo: trailingAnchor),
             stapel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
             aliasRolle.widthAnchor.constraint(equalTo: stapel.widthAnchor),
-            aliasRolle.heightAnchor.constraint(greaterThanOrEqualToConstant: 110),
+            aliasRolle.heightAnchor.constraint(greaterThanOrEqualToConstant: 80),
             begriffFeld.widthAnchor.constraint(greaterThanOrEqualToConstant: 220),
             decknameFeld.widthAnchor.constraint(greaterThanOrEqualToConstant: 150),
             leerhinweis.centerYAnchor.constraint(equalTo: centerYAnchor),
