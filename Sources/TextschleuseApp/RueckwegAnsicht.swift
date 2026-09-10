@@ -30,6 +30,9 @@ final class RueckwegAnsicht: NSView, NSUserInterfaceValidations {
     private let knopfleiste = NSStackView()
     private let fusszeile = NSTextField(labelWithString: "")
     private let meldung = NSTextField(labelWithString: "")
+    /// Wechselt zwischen „Ignorieren" und „Wieder beachten", je nachdem, was
+    /// gerade ausgewählt ist.
+    private var ignorierKnopf = NSButton()
 
     init(
         ergebnis: RueckwegErgebnis,
@@ -110,8 +113,11 @@ final class RueckwegAnsicht: NSView, NSUserInterfaceValidations {
         vorKnopf.toolTip = "Nächster Platzhalter (↓)"
         let suchKnopf = NSButton(title: "Suchen", target: self, action: #selector(aktionSuchen(_:)))
         suchKnopf.toolTip = "Im Text suchen (⌘F)"
+        ignorierKnopf = NSButton(title: "Ignorieren (⌫)", target: self, action: #selector(aktionIgnorieren(_:)))
+        ignorierKnopf.toolTip = "Diesen Platzhalter beiseitelegen. Er bleibt im Text stehen, "
+            + "zählt aber nicht mehr als offener Punkt. Gilt für alle Stellen mit demselben Namen."
 
-        for knopf in [zurueckKnopf, vorKnopf, suchKnopf, zuordnen, anlegen, neu] {
+        for knopf in [zurueckKnopf, vorKnopf, suchKnopf, zuordnen, anlegen, ignorierKnopf, neu] {
             knopf.bezelStyle = .rounded
             knopf.controlSize = .small
             knopfleiste.addArrangedSubview(knopf)
@@ -124,8 +130,9 @@ final class RueckwegAnsicht: NSView, NSUserInterfaceValidations {
 
         fusszeile.font = .systemFont(ofSize: 11)
         fusszeile.textColor = .secondaryLabelColor
-        fusszeile.stringValue = "⏎ Kopieren · ↑ ↓ Platzhalter · ⌘F Suchen · ⌘N Neuer Text · ⎋ Abbrechen. "
-            + "Was rot ist, kennt das Wörterbuch nicht — unten zuordnen, dann geht es dauerhaft auf."
+        fusszeile.stringValue = "⏎ Kopieren · ↑ ↓ Platzhalter · ⌫ Ignorieren · ⌘F Suchen · "
+            + "⌘N Neuer Text · ⎋ Abbrechen. Was rot ist, kennt das Wörterbuch nicht — unten "
+            + "zuordnen, dann geht es dauerhaft auf, oder mit ⌫ beiseitelegen."
 
         let mitte = NSStackView(views: [rollflaeche, liste])
         mitte.orientation = .horizontal
@@ -193,7 +200,8 @@ final class RueckwegAnsicht: NSView, NSUserInterfaceValidations {
     /// Zuordnen geht nur bei einem Platzhalter, der noch offen ist. Bei den
     /// aufgelösten gibt es nichts zu entscheiden.
     private func aktualisiereKnoepfe() {
-        let offen = aktuellerFund?.istAufloesbar == false
+        let fund = aktuellerFund
+        let offen = fund?.istAufloesbar == false
         for ansicht in knopfleiste.arrangedSubviews {
             guard let knopf = ansicht as? NSButton else { continue }
             if knopf.title.hasPrefix("Zu Eintrag") {
@@ -202,6 +210,27 @@ final class RueckwegAnsicht: NSView, NSUserInterfaceValidations {
                 knopf.isEnabled = offen
             }
         }
+        // Aufgelöste Platzhalter lassen sich nicht beiseitelegen — sie sind
+        // ja schon beantwortet.
+        ignorierKnopf.isEnabled = offen
+        ignorierKnopf.title = fund?.ignoriert == true ? "Wieder beachten (⌫)" : "Ignorieren (⌫)"
+    }
+
+    /// Legt den ausgewählten Platzhalter beiseite oder holt ihn zurück.
+    @objc func aktionIgnorieren(_ absender: Any?) {
+        guard let fund = aktuellerFund, !fund.istAufloesbar else { return }
+        let betroffen = fund.ignoriert
+            ? ergebnis.beachteWieder(fundId: fund.id)
+            : ergebnis.ignoriere(fundId: fund.id)
+        aktualisiere()
+        guard betroffen > 0 else { return }
+        meldung.textColor = .secondaryLabelColor
+        meldung.stringValue = fund.ignoriert
+            ? "\(fund.normal) zählt wieder als offener Punkt."
+            : (betroffen > 1
+                ? "\(fund.normal) bleibt an allen \(betroffen) Stellen stehen."
+                : "\(fund.normal) bleibt stehen.")
+        meldung.isHidden = false
     }
 
     private var aktuellerFund: PlatzhalterFund? {
@@ -239,7 +268,7 @@ final class RueckwegAnsicht: NSView, NSUserInterfaceValidations {
         switch eintrag.action {
         case #selector(aktionZuordnen(_:)):
             return aktuellerFund?.istAufloesbar == false && !woerterbuch.eintraege.isEmpty
-        case #selector(aktionNeuerEintrag(_:)):
+        case #selector(aktionNeuerEintrag(_:)), #selector(aktionIgnorieren(_:)):
             return aktuellerFund?.istAufloesbar == false
         case #selector(aktionNaechsteFundstelle(_:)), #selector(aktionVorigeFundstelle(_:)):
             return !ergebnis.funde.isEmpty
@@ -355,23 +384,38 @@ final class RueckwegAnsicht: NSView, NSUserInterfaceValidations {
         }
 
         kopfzeile.stringValue = "\(ergebnis.aufgeloest.count) von \(ergebnis.funde.count) Platzhaltern aufgelöst"
+        let beiseite = Set(ergebnis.ignorierte.map(\.normal)).count
+        let nachsatz = beiseite > 0 ? " \(beiseite) beiseitegelegt." : ""
         if ergebnis.offen.isEmpty {
-            warnzeile.stringValue = "Alle Platzhalter sind bekannt."
+            warnzeile.stringValue = "Alle Platzhalter sind entschieden." + nachsatz
             warnzeile.textColor = .secondaryLabelColor
         } else {
             let liste = Set(ergebnis.offen.map(\.normal)).sorted().joined(separator: ", ")
-            warnzeile.stringValue = "Bleiben stehen, weil das Wörterbuch sie nicht kennt: \(liste)"
+            warnzeile.stringValue = "Bleiben stehen, weil das Wörterbuch sie nicht kennt: \(liste)."
+                + " ⌫ legt sie beiseite." + nachsatz
             warnzeile.textColor = .systemRed
         }
     }
 
     private func listenzeile(_ fund: PlatzhalterFund) -> Fundstellenliste.Zeile {
-        Fundstellenliste.Zeile(
+        let status: String
+        let farbe: NSColor
+        if fund.istAufloesbar {
+            status = "wird eingesetzt"
+            farbe = .systemGreen
+        } else if fund.ignoriert {
+            status = "ignoriert, bleibt stehen"
+            farbe = .tertiaryLabelColor
+        } else {
+            status = "unbekannt, bleibt stehen"
+            farbe = .systemRed
+        }
+        return Fundstellenliste.Zeile(
             id: fund.id,
             begriff: fund.klartext ?? fund.geschrieben,
             deckname: fund.normal,
-            status: fund.istAufloesbar ? "wird eingesetzt" : "unbekannt, bleibt stehen",
-            farbe: fund.istAufloesbar ? .systemGreen : .systemRed,
+            status: status,
+            farbe: farbe,
             abgeschwaecht: !fund.istAufloesbar
         )
     }
@@ -446,6 +490,10 @@ final class RueckwegAnsicht: NSView, NSUserInterfaceValidations {
             return true
         case 125:
             waehle(auswahl + 1)
+            return true
+        case 51, 117:
+            // ⌫ und ⌦, wie im Schützen-Modus das Verwerfen.
+            aktionIgnorieren(nil)
             return true
         default:
             return false

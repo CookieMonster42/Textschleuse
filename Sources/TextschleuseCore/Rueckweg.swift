@@ -10,22 +10,30 @@ public struct PlatzhalterFund: Identifiable, Sendable {
     public var normal: String
     /// Der Klartext, falls auflösbar.
     public var klartext: String?
+    /// Von dir beiseitegelegt: bleibt im Text stehen, wird aber nicht mehr
+    /// als offener Punkt gezählt. Für Platzhalter aus fremden Texten oder
+    /// aus einer Sitzung, die längst beendet ist.
+    public var ignoriert: Bool
 
     public init(
         id: UUID = UUID(),
         bereich: NSRange,
         geschrieben: String,
         normal: String,
-        klartext: String?
+        klartext: String?,
+        ignoriert: Bool = false
     ) {
         self.id = id
         self.bereich = bereich
         self.geschrieben = geschrieben
         self.normal = normal
         self.klartext = klartext
+        self.ignoriert = ignoriert
     }
 
     public var istAufloesbar: Bool { klartext != nil }
+    /// Braucht noch eine Entscheidung: nicht auflösbar und nicht beiseitegelegt.
+    public var istOffen: Bool { klartext == nil && !ignoriert }
 }
 
 public struct RueckwegErgebnis: Sendable {
@@ -38,7 +46,32 @@ public struct RueckwegErgebnis: Sendable {
     }
 
     public var aufgeloest: [PlatzhalterFund] { funde.filter(\.istAufloesbar) }
-    public var offen: [PlatzhalterFund] { funde.filter { !$0.istAufloesbar } }
+    public var offen: [PlatzhalterFund] { funde.filter(\.istOffen) }
+    public var ignorierte: [PlatzhalterFund] { funde.filter(\.ignoriert) }
+
+    /// Legt einen Platzhalter beiseite — und mit ihm jeden anderen, der
+    /// denselben Namen trägt. Ein `PERSON_4`, das an fünf Stellen steht, ist
+    /// fünfmal dieselbe Entscheidung.
+    @discardableResult
+    public mutating func ignoriere(fundId: UUID) -> Int {
+        setzeIgnoriert(fundId: fundId, auf: true)
+    }
+
+    @discardableResult
+    public mutating func beachteWieder(fundId: UUID) -> Int {
+        setzeIgnoriert(fundId: fundId, auf: false)
+    }
+
+    private mutating func setzeIgnoriert(fundId: UUID, auf wert: Bool) -> Int {
+        guard let fund = funde.first(where: { $0.id == fundId }) else { return 0 }
+        var betroffen = 0
+        for index in funde.indices
+        where funde[index].normal == fund.normal && funde[index].ignoriert != wert {
+            funde[index].ignoriert = wert
+            betroffen += 1
+        }
+        return betroffen
+    }
 
     /// Der zurückgedrehte Text. Platzhalter ohne Zuordnung bleiben stehen.
     public var ergebnis: String {
@@ -60,12 +93,18 @@ public enum Rueckweg {
 
     /// Das Muster für automatisch vergebene Namen: Kategoriekürzel, Nummer,
     /// optional ein Aliasbuchstabe.
+    ///
+    /// Danach dürfen beliebig viele weitere Abschnitte mit Unterstrich folgen.
+    /// Ein von Hand erweiterter Deckname wie `PERSON_1_MEIER_JR` muss ganz
+    /// erfasst werden; ohne die Fortsetzung griff nur `PERSON_1` und `_MEIER_JR`
+    /// blieb im zurückgedrehten Text stehen.
     static var muster: String {
         let praefixe = Kategorie.allCases
             .map { NSRegularExpression.escapedPattern(for: $0.praefix) }
             .sorted { $0.count > $1.count }
             .joined(separator: "|")
-        return "(?<![\\p{L}\\p{N}])(\(praefixe))[ _\\-]?(\\d+)([A-Za-z]{0,3})(?![\\p{L}\\p{N}])"
+        return "(?<![\\p{L}\\p{N}_])(\(praefixe))[ _\\-]?(\\d+)([A-Za-z]{0,3})"
+            + "((?:_[\\p{L}\\p{N}]+)*)(?![\\p{L}\\p{N}_])"
     }
 
     /// Das Muster für selbst vergebene Decknamen. Die lassen sich nicht aus
@@ -101,8 +140,13 @@ public enum Rueckweg {
             let suffix = suffixBereich.location == NSNotFound || suffixBereich.length == 0
                 ? ""
                 : nsText.substring(with: suffixBereich).uppercased()
+            let fortsetzungBereich = treffer.range(at: 4)
+            let fortsetzung = fortsetzungBereich.location == NSNotFound
+                || fortsetzungBereich.length == 0
+                ? ""
+                : nsText.substring(with: fortsetzungBereich).uppercased()
 
-            let normal = "\(praefix)_\(nummer)\(suffix)"
+            let normal = "\(praefix)_\(nummer)\(suffix)\(fortsetzung)"
             funde.append(PlatzhalterFund(
                 bereich: treffer.range,
                 geschrieben: nsText.substring(with: treffer.range),

@@ -1322,6 +1322,115 @@ Pruefstand.pruefe("Eintragsliste: Suche ohne Rücksicht auf Umlaute und Fälle")
     Pruefstand.gleich(leer.count, 0, "kein Treffer, keine leeren Blöcke")
 }
 
+// MARK: Neuanalyse nach einer Textkorrektur
+
+Pruefstand.pruefe("Neuanalyse: Verworfenes bleibt verworfen") {
+    let text = "Sally kam. Sally ging. Almut rief an."
+    var analyse = Schleuse.analysiere(text, woerterbuch: Woerterbuch())
+    guard let sally = analyse.funde.first(where: { $0.text == "Sally" }) else {
+        Pruefstand.wahr(false, "Sally gefunden")
+        return
+    }
+    Schleuse.verwerfe(fundId: sally.id, in: &analyse)
+    Pruefstand.falsch(
+        analyse.aktiveFunde.contains { $0.text == "Sally" },
+        "Sally ist raus"
+    )
+
+    // Jetzt ein Tippfehler weiter hinten korrigieren.
+    let korrigiert = "Sally kam. Sally ging. Almut rief zweimal an."
+    let neue = Schleuse.analysiereErneut(korrigiert, wie: analyse)
+    Pruefstand.falsch(
+        neue.aktiveFunde.contains { $0.text == "Sally" },
+        "Sally bleibt auch nach der Korrektur raus"
+    )
+    Pruefstand.wahr(
+        neue.aktiveFunde.contains { $0.text == "Almut" },
+        "Almut ist weiterhin ein Fund"
+    )
+}
+
+Pruefstand.pruefe("Neuanalyse: von Hand Markiertes überlebt") {
+    let text = "Das Projekt Nordlicht läuft. Nordlicht kostet Geld."
+    var analyse = Schleuse.analysiere(text, woerterbuch: Woerterbuch())
+    guard Schleuse.markiere(
+        bereich: (text as NSString).range(of: "Nordlicht"),
+        als: .begriff,
+        merken: false,
+        in: &analyse
+    ) != nil else {
+        Pruefstand.wahr(false, "Markierung angelegt")
+        return
+    }
+    let vorher = analyse.aktiveFunde.filter { $0.text == "Nordlicht" }.count
+    Pruefstand.wahr(vorher >= 1, "Nordlicht ist markiert (\(vorher) Stellen)")
+
+    let korrigiert = "Das Projekt Nordlicht läuft gut. Nordlicht kostet Geld."
+    let neue = Schleuse.analysiereErneut(korrigiert, wie: analyse)
+    let nachher = neue.aktiveFunde.filter { $0.text == "Nordlicht" }.count
+    Pruefstand.gleich(nachher, vorher, "nach der Korrektur genauso viele")
+}
+
+Pruefstand.pruefe("Neuanalyse: Bestätigtes bleibt bestätigt") {
+    let text = "Sehr geehrte Frau Weidenbach, danke."
+    var analyse = Schleuse.analysiere(text, woerterbuch: Woerterbuch())
+    guard let fund = analyse.funde.first(where: { $0.text.contains("Weidenbach") }) else {
+        Pruefstand.wahr(false, "Weidenbach gefunden")
+        return
+    }
+    Schleuse.bestaetige(fundId: fund.id, als: .person, in: &analyse)
+
+    let neue = Schleuse.analysiereErneut("Sehr geehrte Frau Weidenbach, vielen Dank.", wie: analyse)
+    Pruefstand.gleich(neue.ungeprueft.count, 0, "nichts mehr offen")
+}
+
+// MARK: Rückweg mit erweiterten Decknamen
+
+Pruefstand.pruefe("Rückweg: Deckname mit weiteren Unterstrichen") {
+    var buch = Woerterbuch()
+    let eintrag = buch.anlegen(text: "Thorben Nyström", kategorie: .person)
+    try? buch.umbenennen(eintrag.id, auf: "PERSON_1_MEIER_JR")
+
+    let ergebnis = Rueckweg.analysiere("Bitte an PERSON_1_MEIER_JR schreiben.", woerterbuch: buch)
+    Pruefstand.gleich(ergebnis.funde.count, 1, "ein Platzhalter")
+    Pruefstand.gleich(ergebnis.funde.first?.normal, "PERSON_1_MEIER_JR", "ganz erfasst")
+    Pruefstand.gleich(
+        ergebnis.ergebnis,
+        "Bitte an Thorben Nyström schreiben.",
+        "kein Rest wie _MEIER_JR bleibt stehen"
+    )
+}
+
+Pruefstand.pruefe("Rückweg: der einfache Deckname bleibt unberührt") {
+    var buch = Woerterbuch()
+    _ = buch.anlegen(text: "Thorben Nyström", kategorie: .person)
+    let ergebnis = Rueckweg.analysiere("PERSON_1 und PERSON_1B melden sich.", woerterbuch: buch)
+    Pruefstand.gleich(ergebnis.funde.count, 2, "beide erkannt")
+    Pruefstand.gleich(ergebnis.funde.first?.normal, "PERSON_1", "ohne Fortsetzung bleibt es kurz")
+    Pruefstand.gleich(ergebnis.funde.last?.normal, "PERSON_1B", "Aliasbuchstabe wie bisher")
+}
+
+Pruefstand.pruefe("Rückweg: unbekannte Platzhalter lassen sich ignorieren") {
+    var ergebnis = Rueckweg.analysiere(
+        "PERSON_9 traf PERSON_9 und FIRMA_2.",
+        woerterbuch: Woerterbuch()
+    )
+    Pruefstand.gleich(ergebnis.offen.count, 3, "drei offene Stellen")
+
+    guard let erste = ergebnis.funde.first(where: { $0.normal == "PERSON_9" }) else {
+        Pruefstand.wahr(false, "PERSON_9 gefunden")
+        return
+    }
+    let betroffen = ergebnis.ignoriere(fundId: erste.id)
+    Pruefstand.gleich(betroffen, 2, "beide PERSON_9 auf einmal")
+    Pruefstand.gleich(ergebnis.offen.count, 1, "nur FIRMA_2 bleibt offen")
+    Pruefstand.gleich(ergebnis.ignorierte.count, 2, "zwei beiseitegelegt")
+    Pruefstand.enthaelt(ergebnis.ergebnis, "PERSON_9", "im Text steht der Platzhalter weiter")
+
+    ergebnis.beachteWieder(fundId: erste.id)
+    Pruefstand.gleich(ergebnis.offen.count, 3, "zurückgeholt sind wieder alle offen")
+}
+
 // MARK: Schutz vor Datenverlust
 
 Pruefstand.pruefe("Speicher: legt vor jedem Schreiben eine Sicherung an") {
