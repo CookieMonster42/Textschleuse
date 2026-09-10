@@ -86,12 +86,17 @@ final class WoerterbuchAnsicht: NSView {
     required init?(coder: NSCoder) { fatalError("nicht unterstützt") }
 
     private func baueOberflaeche() {
-        for (kennung, titel, breite) in [
-            ("text", "Begriff", 220.0),
-            ("platzhalter", "Deckname", 130.0),
-            ("kategorie", "Typ", 100.0),
-            ("herkunft", "Herkunft", 120.0),
-        ] {
+        // Im schmalen Fall bleibt kein Platz für vier Spalten nebeneinander.
+        // Begriff und Deckname reichen; Typ und Herkunft stehen im Editor.
+        let spaltenBeschreibung: [(String, String, Double)] = schmal
+            ? [("text", "Begriff", 150.0), ("platzhalter", "Deckname", 100.0)]
+            : [
+                ("text", "Begriff", 220.0),
+                ("platzhalter", "Deckname", 130.0),
+                ("kategorie", "Typ", 100.0),
+                ("herkunft", "Herkunft", 120.0),
+            ]
+        for (kennung, titel, breite) in spaltenBeschreibung {
             let spalte = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(kennung))
             spalte.title = titel
             spalte.width = breite
@@ -193,6 +198,24 @@ final class WoerterbuchAnsicht: NSView {
         links.distribution = .fillEqually
         links.translatesAutoresizingMaskIntoConstraints = false
 
+        // Rollflächen haben keine eigene Größe. In einem einzelnen Stapel
+        // bekommen sie den Rest, aber sobald Stapel ineinander stecken,
+        // reicht niemand die Höhe durch — dann fallen sie auf null zusammen
+        // und die Liste ist unsichtbar, obwohl alle Zeilen da sind.
+        for rolle in [rollflaeche, rolleImText] {
+            rolle.setContentHuggingPriority(.defaultLow, for: .vertical)
+            rolle.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        }
+        // Der Editor darunter nimmt sich, was er braucht, und nicht mehr —
+        // den Rest bekommen die Listen.
+        editor.setContentHuggingPriority(.required, for: .vertical)
+        links.setContentHuggingPriority(.defaultLow, for: .vertical)
+        for kopf in [ueberschriftImText, ueberschriftAlle] {
+            kopf.setContentHuggingPriority(.required, for: .vertical)
+        }
+        suchfeld.setContentHuggingPriority(.required, for: .vertical)
+        aufloesungZeile.setContentHuggingPriority(.required, for: .vertical)
+
         let mitte = NSStackView(views: [links, editor])
         mitte.orientation = schmal ? .vertical : .horizontal
         mitte.spacing = schmal ? 10 : 16
@@ -226,6 +249,14 @@ final class WoerterbuchAnsicht: NSView {
             rollflaeche.widthAnchor.constraint(equalTo: spalteAlle.widthAnchor),
             rolleImText.widthAnchor.constraint(equalTo: spalteImText.widthAnchor),
             aufloesungZeile.widthAnchor.constraint(equalTo: spalteAlle.widthAnchor),
+
+            // Ohne diese Maße bleibt von den Listen nichts übrig.
+            links.widthAnchor.constraint(equalTo: mitte.widthAnchor),
+            links.heightAnchor.constraint(greaterThanOrEqualToConstant: 380),
+            rollflaeche.heightAnchor.constraint(greaterThanOrEqualToConstant: 200),
+            rolleImText.heightAnchor.constraint(greaterThanOrEqualToConstant: 200),
+            rollflaeche.bottomAnchor.constraint(equalTo: spalteAlle.bottomAnchor),
+            rolleImText.bottomAnchor.constraint(equalTo: spalteImText.bottomAnchor),
             schmal
                 ? editor.widthAnchor.constraint(equalTo: mitte.widthAnchor)
                 : editor.widthAnchor.constraint(equalToConstant: 340),
