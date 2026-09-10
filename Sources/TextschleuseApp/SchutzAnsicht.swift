@@ -986,6 +986,9 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
     func vorschauUmschaltenFuerPruefung() { vorschauUmschalten() }
     func waehleFundFuerPruefung(_ kennung: UUID) { waehleFund(kennung) }
     func ausgewaehlterFundFuerPruefung() -> UUID? { aktuellerFund?.id }
+    /// Löst die Neuprüfung sofort aus, ohne die Tipppause abzuwarten.
+    func pruefeJetztFuerPruefung() { pruefeJetzt() }
+    func ausgewaehlterBegriffFuerPruefung() -> String? { aktuellerFund?.text }
     func decknameUebernehmenFuerPruefung() { decknameUebernehmen() }
     @discardableResult
     func fokussiereTextFuerPruefung() -> Bool {
@@ -1095,9 +1098,41 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
         // Ein Stand je Tipppause, nicht je Anschlag. ⌘Z nimmt damit den
         // ganzen zusammenhängenden Schwung zurück.
         merkeStand("Tippen")
-        analyse = Schleuse.analysiere(getippt, woerterbuch: analyse.woerterbuch)
-        auswahl = 0
+
+        // Merken, wo man war: nach einer Korrektur mitten im Text will man
+        // dort weitermachen und nicht wieder bei der ersten Fundstelle.
+        let vorherigerBegriff = aktuellerFund?.text
+        let vorherigeStelle = aktuellerFund?.bereich.location
+
+        analyse = Schleuse.analysiereErneut(getippt, wie: analyse)
         aktualisiere(originalMarke: marke)
+        stelleAuswahlWiederHer(begriff: vorherigerBegriff, nahe: vorherigeStelle)
+    }
+
+    /// Sucht nach einer Neuanalyse dieselbe Fundstelle wieder: erst über den
+    /// Wortlaut, sonst die nächstgelegene.
+    private func stelleAuswahlWiederHer(begriff: String?, nahe stelle: Int?) {
+        guard !reihenfolge.isEmpty else {
+            auswahl = 0
+            return
+        }
+        let funde = reihenfolge.compactMap { kennung in
+            analyse.funde.first { $0.id == kennung }
+        }
+        if let begriff,
+           let index = funde.firstIndex(where: {
+               $0.text.compare(begriff, options: .caseInsensitive) == .orderedSame
+           }) {
+            auswahl = index
+        } else if let stelle {
+            let naechste = funde.enumerated().min {
+                abs($0.element.bereich.location - stelle) < abs($1.element.bereich.location - stelle)
+            }
+            auswahl = naechste?.offset ?? 0
+        } else {
+            auswahl = 0
+        }
+        aktualisiere()
     }
 
     /// Holt sich, was jetzt in der Zwischenablage liegt    /// Holt sich, was jetzt in der Zwischenablage liegt, und fängt damit von

@@ -252,6 +252,60 @@ public enum Schleuse {
     /// Bestehende Funde, die in der Markierung liegen, verschwinden: du hast
     /// gerade ausdrücklich gesagt, was hier gilt.
     @discardableResult
+    /// Prüft einen geänderten Text noch einmal und nimmt dabei mit, was du
+    /// schon entschieden hattest.
+    ///
+    /// Ohne das war jede Korrektur im Text teuer: ein Buchstabe getippt, und
+    /// alle verworfenen Begriffe standen wieder als Fundstelle da, alle von
+    /// Hand markierten waren weg. Was hier überlebt:
+    ///
+    /// - Verworfene Begriffe bleiben verworfen, überall im Text.
+    /// - Von Hand markierte Stellen werden neu gesucht und wieder gesetzt.
+    /// - Bestätigte Vermutungen bleiben bestätigt.
+    /// - Die Sitzungsdecknamen (`UNBEKANNT_n`) bleiben dieselben.
+    public static func analysiereErneut(_ text: String, wie vorherige: Analyse) -> Analyse {
+        var neue = analysiere(text, woerterbuch: vorherige.woerterbuch)
+        neue.unbekannte = vorherige.unbekannte
+
+        // Von Hand Markiertes zuerst: es schlägt jede Automatik und muss
+        // deshalb wieder im Text stehen, bevor Entscheidungen greifen.
+        let nsText = text as NSString
+        for alter in vorherige.funde where alter.quelle == .markierung && !alter.verworfen {
+            let schonDa = neue.funde.contains {
+                $0.text.compare(alter.text, options: .caseInsensitive) == .orderedSame
+            }
+            guard !schonDa else { continue }
+            var suchab = 0
+            while suchab < nsText.length {
+                let rest = NSRange(location: suchab, length: nsText.length - suchab)
+                let treffer = nsText.range(of: alter.text, options: [], range: rest)
+                guard treffer.location != NSNotFound else { break }
+                _ = markiere(
+                    bereich: treffer,
+                    als: alter.kategorie,
+                    merken: false,
+                    in: &neue
+                )
+                suchab = NSMaxRange(treffer)
+            }
+        }
+
+        let verworfen = Set(vorherige.funde.filter(\.verworfen).map { $0.text.lowercased() })
+        let bestaetigt = Set(vorherige.funde.filter(\.bestaetigt).map { $0.text.lowercased() })
+        for index in neue.funde.indices {
+            let wortlaut = neue.funde[index].text.lowercased()
+            if verworfen.contains(wortlaut) {
+                neue.funde[index].verworfen = true
+                if neue.funde[index].eintragId == nil {
+                    neue.unbekannte.removeValue(forKey: neue.funde[index].platzhalter)
+                }
+            } else if bestaetigt.contains(wortlaut) {
+                neue.funde[index].bestaetigt = true
+            }
+        }
+        return neue
+    }
+
     public static func markiere(
         bereich: NSRange,
         als kategorie: Kategorie,

@@ -44,6 +44,8 @@ enum Selbsttest {
         fehler += pruefeFenstergroesse()
         fehler += pruefeZuordnungsliste()
         fehler += pruefeWoerterbuchBeiEnge()
+        fehler += pruefeKorrekturImText()
+        fehler += pruefeIgnorierenImRueckweg()
 
         print("")
         print(fehler == 0 ? "Alles in Ordnung." : "\(fehler) Punkt(e) fehlgeschlagen.")
@@ -1391,6 +1393,106 @@ enum Selbsttest {
             fehler += miss("Hauptfenster eng", spalte, spalte.frame.height)
         } else {
             print("✗ Enge (Hauptfenster eng): keine Spalte")
+            fehler += 1
+        }
+        return fehler
+    }
+
+    /// Ein Wort im Text korrigieren darf nicht alle Entscheidungen aufheben.
+    private static func pruefeKorrekturImText() -> Int {
+        var fehler = 0
+        let text = "Sally kam. Sally ging. Almut Weidenbach rief an."
+        let ansicht = SchutzAnsicht(analyse: Schleuse.analysiere(text, woerterbuch: Woerterbuch()))
+        let fenster = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1000, height: 640),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        fenster.contentView = ansicht
+        fenster.layoutIfNeeded()
+        defer { fenster.orderOut(nil) }
+
+        // Sally verwerfen und danach auf Almut stehen bleiben.
+        guard let sally = ansicht.analyse.funde.first(where: { $0.text == "Sally" }),
+              let almut = ansicht.analyse.funde.first(where: { $0.text.contains("Almut") })
+        else {
+            print("✗ Korrektur: Ausgangsfunde fehlen")
+            return 1
+        }
+        ansicht.waehleFundFuerPruefung(sally.id)
+        ansicht.aktionVerwerfen(nil)
+        ansicht.waehleFundFuerPruefung(almut.id)
+        let vorher = ansicht.ausgewaehlterBegriffFuerPruefung()
+
+        // Jetzt hinten ein Wort ergänzen, so wie beim Korrigieren im Text.
+        ansicht.setzeTextFuerPruefung("Sally kam. Sally ging. Almut Weidenbach rief zweimal an.")
+        ansicht.pruefeJetztFuerPruefung()
+
+        let aktiv = ansicht.analyse.aktiveFunde.map(\.text)
+        if !aktiv.contains("Sally") {
+            print("✓ Korrektur: das verworfene Sally bleibt draußen")
+        } else {
+            print("✗ Korrektur: Sally ist wieder da")
+            fehler += 1
+        }
+
+        let nachher = ansicht.ausgewaehlterBegriffFuerPruefung()
+        if nachher == vorher {
+            print("✓ Korrektur: die Auswahl bleibt auf „\(nachher ?? "—")\"")
+        } else {
+            print("✗ Korrektur: Auswahl sprang von „\(vorher ?? "—")\" auf „\(nachher ?? "—")\"")
+            fehler += 1
+        }
+        return fehler
+    }
+
+    /// Unbekannte Platzhalter beim Zurückdrehen beiseitelegen.
+    private static func pruefeIgnorierenImRueckweg() -> Int {
+        var fehler = 0
+        let ansicht = RueckwegAnsicht(ergebnis: Rueckweg.analysiere(
+            "PERSON_9 traf PERSON_9 und FIRMA_2.",
+            woerterbuch: Woerterbuch()
+        ))
+        let fenster = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1000, height: 640),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        fenster.contentView = ansicht
+        fenster.layoutIfNeeded()
+        defer { fenster.orderOut(nil) }
+
+        if ansicht.offeneFuerPruefung() == 3 {
+            print("✓ Ignorieren: drei offene Platzhalter zu Beginn")
+        } else {
+            print("✗ Ignorieren: \(ansicht.offeneFuerPruefung()) offene statt 3")
+            fehler += 1
+        }
+
+        ansicht.waehleFundFuerPruefung(0)
+        ansicht.aktionIgnorieren(nil)
+        if ansicht.offeneFuerPruefung() == 1 {
+            print("✓ Ignorieren: ⌫ legt beide PERSON_9 auf einmal beiseite")
+        } else {
+            print("✗ Ignorieren: noch \(ansicht.offeneFuerPruefung()) offen statt 1")
+            fehler += 1
+        }
+
+        // Der Text darf sich dabei nicht ändern — ignoriert heißt stehenlassen.
+        if ansicht.ergebnis.ergebnis.contains("PERSON_9") {
+            print("✓ Ignorieren: der Platzhalter bleibt im Text stehen")
+        } else {
+            print("✗ Ignorieren: der Platzhalter verschwand aus dem Text")
+            fehler += 1
+        }
+
+        ansicht.aktionIgnorieren(nil)
+        if ansicht.offeneFuerPruefung() == 3 {
+            print("✓ Ignorieren: nochmal ⌫ holt sie zurück")
+        } else {
+            print("✗ Ignorieren: zurückgeholt sind \(ansicht.offeneFuerPruefung()) offen statt 3")
             fehler += 1
         }
         return fehler
