@@ -1322,6 +1322,84 @@ Pruefstand.pruefe("Eintragsliste: Suche ohne Rücksicht auf Umlaute und Fälle")
     Pruefstand.gleich(leer.count, 0, "kein Treffer, keine leeren Blöcke")
 }
 
+// MARK: Freiliste
+
+Pruefstand.pruefe("Freiliste: Monate und Wochentage sind eingebaut") {
+    Pruefstand.wahr(Freiliste.istFrei("August"), "August")
+    Pruefstand.wahr(Freiliste.istFrei("Mai"), "Mai")
+    Pruefstand.wahr(Freiliste.istFrei("märz"), "märz, klein geschrieben")
+    Pruefstand.wahr(Freiliste.istFrei("Maerz"), "Maerz in Umschrift")
+    Pruefstand.wahr(Freiliste.istFrei("Donnerstag"), "Donnerstag")
+    Pruefstand.falsch(Freiliste.istFrei("Almut"), "ein echter Vorname bleibt draußen")
+}
+
+Pruefstand.pruefe("Freiliste: trifft nur ganze Wörter") {
+    // „Mai" steckt in „Maike" und in „Maier". Beides sind Namen.
+    Pruefstand.falsch(Freiliste.istFrei("Maike"), "Maike ist nicht Mai")
+    Pruefstand.falsch(Freiliste.istFrei("Maier"), "Maier auch nicht")
+    Pruefstand.falsch(Freiliste.istFrei("Augustin"), "Augustin ist nicht August")
+    // Gebeugtes schon.
+    Pruefstand.wahr(Freiliste.istFrei("Augusts"), "die Genitivform zählt mit")
+}
+
+Pruefstand.pruefe("Freiliste: eigene Wörter lassen sich ergänzen und entfernen") {
+    var buch = Woerterbuch()
+    Pruefstand.falsch(buch.istFrei("Nordlicht"), "vorher nicht drauf")
+    Pruefstand.wahr(buch.gibFrei("Nordlicht"), "aufgenommen")
+    Pruefstand.wahr(buch.istFrei("Nordlicht"), "jetzt drauf")
+    Pruefstand.falsch(buch.gibFrei("nordlicht"), "zweimal dasselbe wird nicht doppelt geführt")
+
+    Pruefstand.wahr(buch.nimmVonFreiliste("Nordlicht"), "wieder entfernt")
+    Pruefstand.falsch(buch.istFrei("Nordlicht"), "und nicht mehr frei")
+    Pruefstand.falsch(buch.nimmVonFreiliste("August"), "Eingebautes lässt sich nicht entfernen")
+    Pruefstand.wahr(buch.istFrei("August"), "und bleibt frei")
+}
+
+Pruefstand.pruefe("Freiliste: bremst die Vermutung, nicht die Regel") {
+    let buch = Woerterbuch()
+    // Als Anrede wäre „August" sonst eine Person.
+    let alsPerson = Schleuse.analysiere("Sehr geehrter Herr August, danke.", woerterbuch: buch)
+    Pruefstand.falsch(
+        alsPerson.aktiveFunde.contains { $0.text == "August" },
+        "August allein wird nicht zur Person"
+    )
+
+    // Im Datum muss es durchgehen — dort greift die Regel, nicht die Vermutung.
+    let alsDatum = Schleuse.analysiere("geboren am 3. August 1979 in Mannheim", woerterbuch: buch)
+    Pruefstand.wahr(
+        alsDatum.aktiveFunde.contains { $0.kategorie == .datum && $0.text.contains("August") },
+        "das Geburtsdatum bleibt ein Fund"
+    )
+}
+
+Pruefstand.pruefe("Freiliste: ein gemerkter Eintrag schlägt sie") {
+    var buch = Woerterbuch()
+    _ = buch.anlegen(text: "August", kategorie: .person)
+    let analyse = Schleuse.analysiere("August ruft an.", woerterbuch: buch)
+    Pruefstand.wahr(
+        analyse.aktiveFunde.contains { $0.text == "August" },
+        "wer August ausdrücklich merkt, bekommt ihn auch geschützt"
+    )
+}
+
+Pruefstand.pruefe("Freiliste: übersteht das Speichern") {
+    let ordner = FileManager.default.temporaryDirectory
+        .appendingPathComponent("textschleuse-pruefung-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: ordner) }
+    let speicher = Speicher(ordner: ordner, schluesselquelle: FesterSchluessel())
+
+    var buch = Woerterbuch()
+    buch.gibFrei("Nordlicht")
+    _ = buch.anlegen(text: "Thorben Nyström", kategorie: .person)
+    do {
+        try speicher.sichern(buch)
+        let geladen = try speicher.laden()
+        Pruefstand.wahr(geladen.istFrei("Nordlicht"), "die eigene Freiliste ist wieder da")
+    } catch {
+        Pruefstand.wahr(false, "sichern und laden ohne Fehler (\(error))")
+    }
+}
+
 // MARK: Neuanalyse nach einer Textkorrektur
 
 Pruefstand.pruefe("Neuanalyse: Verworfenes bleibt verworfen") {

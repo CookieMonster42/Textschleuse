@@ -135,15 +135,60 @@ public struct Woerterbuch: Codable, Sendable {
     /// Pro Kategorie die nächste freie Nummer, abgelegt unter `Kategorie.rawValue`.
     /// Wird beim Löschen nicht zurückgedreht.
     public var naechsteNummern: [String: Int]
+    /// Wörter, die nie als Vermutung durchgehen. Siehe `Freiliste`.
+    public var eigeneFreieWoerter: [String]
 
     public init(
         version: Int = Woerterbuch.aktuelleVersion,
         eintraege: [Eintrag] = [],
-        naechsteNummern: [String: Int] = [:]
+        naechsteNummern: [String: Int] = [:],
+        eigeneFreieWoerter: [String] = []
     ) {
         self.version = version
         self.eintraege = eintraege
         self.naechsteNummern = naechsteNummern
+        self.eigeneFreieWoerter = eigeneFreieWoerter
+    }
+
+    /// Von Hand geschrieben: `eigeneFreieWoerter` fehlt in älteren Dateien,
+    /// und der abgeleitete Decoder bricht bei fehlenden Schlüsseln ab.
+    public init(from decoder: Decoder) throws {
+        let behaelter = try decoder.container(keyedBy: CodingKeys.self)
+        version = try behaelter.decode(Int.self, forKey: .version)
+        eintraege = try behaelter.decode([Eintrag].self, forKey: .eintraege)
+        naechsteNummern = try behaelter.decodeIfPresent(
+            [String: Int].self,
+            forKey: .naechsteNummern
+        ) ?? [:]
+        eigeneFreieWoerter = try behaelter.decodeIfPresent(
+            [String].self,
+            forKey: .eigeneFreieWoerter
+        ) ?? []
+    }
+
+    // MARK: Freiliste
+
+    /// Steht das Wort auf der Freiliste — eingebaut oder selbst ergänzt?
+    public func istFrei(_ wort: String) -> Bool {
+        Freiliste.istFrei(wort, eigene: eigeneFreieWoerter)
+    }
+
+    /// Nimmt ein Wort auf. Liefert `false`, wenn es schon draufstand.
+    @discardableResult
+    public mutating func gibFrei(_ wort: String) -> Bool {
+        let geputzt = wort.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !geputzt.isEmpty, !istFrei(geputzt) else { return false }
+        eigeneFreieWoerter.append(geputzt)
+        return true
+    }
+
+    /// Nimmt ein selbst ergänztes Wort wieder herunter. Die eingebauten
+    /// bleiben, die stehen nicht zur Wahl.
+    @discardableResult
+    public mutating func nimmVonFreiliste(_ wort: String) -> Bool {
+        let vorher = eigeneFreieWoerter.count
+        eigeneFreieWoerter.removeAll { Freiliste.gleich($0, wort) }
+        return eigeneFreieWoerter.count != vorher
     }
 
     // MARK: Anlegen und Ändern
