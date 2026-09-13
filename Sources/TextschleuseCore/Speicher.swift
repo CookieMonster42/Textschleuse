@@ -182,11 +182,17 @@ public final class Speicher {
     func legeSicherungAn() throws {
         try FileManager.default.createDirectory(at: sicherungsordner, withIntermediateDirectories: true)
         let stempel = Self.stempelformat.string(from: Date())
-        let ziel = sicherungsordner.appendingPathComponent("woerterbuch-\(stempel).dat")
-        if !FileManager.default.fileExists(atPath: ziel.path) {
-            try FileManager.default.copyItem(at: datei, to: ziel)
-            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: ziel.path)
+        // Zwei Sicherungen in derselben Millisekunde bekommen eine
+        // Laufnummer. Vorher fiel die zweite stillschweigend weg, und auf
+        // einem schnellen Rechner kommt das beim Durchklicken vor.
+        var ziel = sicherungsordner.appendingPathComponent("woerterbuch-\(stempel).dat")
+        var laufnummer = 2
+        while FileManager.default.fileExists(atPath: ziel.path) {
+            ziel = sicherungsordner.appendingPathComponent("woerterbuch-\(stempel)-\(laufnummer).dat")
+            laufnummer += 1
         }
+        try FileManager.default.copyItem(at: datei, to: ziel)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: ziel.path)
 
         let alte = sicherungen()
         for ueberzaehlig in alte.dropFirst(Self.sicherungenBehalten) {
