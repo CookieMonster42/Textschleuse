@@ -32,6 +32,80 @@ enum Chiptext {
         var bereiche: [UUID: NSRange]
     }
 
+    /// Ein Stück Text, das als Chip gezeichnet wird — egal, ob es aus dem
+    /// Schützen kommt (`Nyström → PERSON_…`) oder aus dem Rückweg
+    /// (`PERSON_… → Nyström`).
+    struct Chip {
+        var id: UUID
+        /// Lage im Originaltext.
+        var bereich: NSRange
+        /// Der Wortlaut, so wie er im Text steht.
+        var text: String
+        /// Was hinter dem Pfeil steht. Leer heißt: kein Pfeil, nur Farbe.
+        var deckname: String
+        var farbe: NSColor
+        /// Durchgestrichen und blass: verworfen, bleibt Klartext.
+        var durchgestrichen: Bool = false
+    }
+
+    /// Was eine Eingabe im Textfeld darf. Siehe `pruefeAenderung`.
+    enum Aenderung: Equatable {
+        case erlaubt
+        case verboten
+        /// Ein Löschen, das einen Chip anschneidet, wird auf den ganzen Chip
+        /// ausgeweitet: der Chip ist ein Wort, kein Buchstabenhaufen.
+        case ausweiten(NSRange)
+    }
+
+    /// Entscheidet, ob eine Änderung an der Darstellung erlaubt ist.
+    ///
+    /// Erlaubt ist alles am Originaltext. Die Zutat der App — Pfeil und
+    /// Deckname — lässt sich nicht buchstabenweise ändern, aber löschen: wer
+    /// alles markiert und ⌫ drückt, will einen leeren Text, und wer hinter
+    /// einem Chip ⌫ drückt, will den Chip weg. Im ersten Fall liegt jeder
+    /// Deckname ganz in der Markierung, im zweiten wird das Löschen auf den
+    /// ganzen Chip ausgeweitet. Nur Tippen mitten im Decknamen bleibt
+    /// verboten.
+    static func pruefeAenderung(
+        bereich: NSRange,
+        ersatz: String?,
+        in anzeige: NSAttributedString,
+        chips: [UUID: NSRange]
+    ) -> Aenderung {
+        guard NSMaxRange(bereich) <= anzeige.length else { return .verboten }
+
+        if bereich.length == 0 {
+            // Einfügemarke: nur mitten im Deckname sperren. An seinen Rändern
+            // soll man den Namen davor noch verlängern können.
+            let vorher = bereich.location > 0
+                && anzeige.attribute(istPlatzhalter, at: bereich.location - 1, effectiveRange: nil) != nil
+            let danach = bereich.location < anzeige.length
+                && anzeige.attribute(istPlatzhalter, at: bereich.location, effectiveRange: nil) != nil
+            return vorher && danach ? .verboten : .erlaubt
+        }
+
+        var angeschnitten = false
+        var beruehrt = false
+        anzeige.enumerateAttribute(istPlatzhalter, in: bereich) { wert, lauf, _ in
+            guard wert != nil else { return }
+            beruehrt = true
+            var voll = NSRange(location: 0, length: 0)
+            _ = anzeige.attribute(istPlatzhalter, at: lauf.location, effectiveRange: &voll)
+            if voll.location < bereich.location || NSMaxRange(voll) > NSMaxRange(bereich) {
+                angeschnitten = true
+            }
+        }
+        guard beruehrt else { return .erlaubt }
+        guard angeschnitten else { return .erlaubt }
+        guard (ersatz ?? "").isEmpty else { return .verboten }
+
+        var erweitert = bereich
+        for chip in chips.values where NSIntersectionRange(chip, bereich).length > 0 {
+            erweitert = NSUnionRange(erweitert, chip)
+        }
+        return .ausweiten(erweitert)
+    }
+
     /// Rechnet eine Markierung in der Darstellung auf den Originaltext zurück.
     static func originalBereich(
         fuer anzeige: NSRange,
@@ -121,21 +195,37 @@ enum Chiptext {
     }
 
     static func aufbauen(analyse: Analyse, ausgewaehlt: UUID?) -> Ergebnis {
-        let original = analyse.original as NSString
-        let funde = analyse.funde.sorted { $0.bereich.location < $1.bereich.location }
+        let chips = analyse.funde.map { fund in
+            Chip(
+                id: fund.id,
+                bereich: fund.bereich,
+                text: fund.text,
+                deckname: fund.platzhalter,
+                farbe: farbe(fuer: fund),
+                durchgestrichen: fund.verworfen
+            )
+        }
+        return aufbauen(original: analyse.original, chips: chips, ausgewaehlt: ausgewaehlt)
+    }
+
+    static func aufbauen(original text: String, chips: [Chip], ausgewaehlt: UUID?) -> Ergebnis {
+        let original = text as NSString
+        let sortiert = chips
+            .filter { NSMaxRange($0.bereich) <= original.length }
+            .sorted { $0.bereich.location < $1.bereich.location }
         let ergebnis = NSMutableAttributedString()
         var bereiche: [UUID: NSRange] = [:]
 
         var position = 0
-        for fund in funde {
-            let luecke = NSRange(location: position, length: max(0, fund.bereich.location - position))
+        for chip in sortiert where chip.bereich.location >= position {
+            let luecke = NSRange(location: position, length: max(0, chip.bereich.location - position))
             ergebnis.append(lueckeAufbauen(original, luecke))
 
             let start = ergebnis.length
-            ergebnis.append(chip(fuer: fund, ausgewaehlt: fund.id == ausgewaehlt))
-            bereiche[fund.id] = NSRange(location: start, length: ergebnis.length - start)
+            ergebnis.append(self.chip(chip, ausgewaehlt: chip.id == ausgewaehlt))
+            bereiche[chip.id] = NSRange(location: start, length: ergebnis.length - start)
 
-            position = fund.bereich.location + fund.bereich.length
+            position = NSMaxRange(chip.bereich)
         }
 
         let rest = NSRange(location: position, length: max(0, original.length - position))
@@ -163,13 +253,13 @@ enum Chiptext {
         return kopie
     }
 
-    private static func chip(fuer fund: Fund, ausgewaehlt: Bool) -> NSAttributedString {
-        if fund.verworfen {
-            return NSAttributedString(string: fund.text, attributes: mitQuelle(verworfen, fund.bereich))
+    private static func chip(_ chip: Chip, ausgewaehlt: Bool) -> NSAttributedString {
+        if chip.durchgestrichen {
+            return NSAttributedString(string: chip.text, attributes: mitQuelle(verworfen, chip.bereich))
         }
 
-        let hintergrund = farbe(fuer: fund).withAlphaComponent(ausgewaehlt ? 0.34 : 0.16)
-        let farbe = farbe(fuer: fund)
+        let farbe = chip.farbe
+        let hintergrund = farbe.withAlphaComponent(ausgewaehlt ? 0.34 : 0.16)
 
         var attribute: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedSystemFont(ofSize: 13, weight: .medium),
@@ -178,8 +268,8 @@ enum Chiptext {
             // Unsichtbarer Verweis, damit ein Klick im Textfeld zum Fund
             // zurückführt. Die Darstellung bleibt unverändert, weil das
             // Textfeld keine Verweisauszeichnung zeichnet.
-            .link: "fund://\(fund.id.uuidString)",
-            quellbereich: NSValue(range: fund.bereich),
+            .link: "fund://\(chip.id.uuidString)",
+            quellbereich: NSValue(range: chip.bereich),
         ]
         if ausgewaehlt {
             attribute[.underlineStyle] = NSUnderlineStyle.thick.rawValue
@@ -198,13 +288,27 @@ enum Chiptext {
         dekoration[.foregroundColor] = NSColor.secondaryLabelColor
         dekoration.removeValue(forKey: quellbereich)
 
-        let text = NSMutableAttributedString(string: fund.text, attributes: attribute)
+        let text = NSMutableAttributedString(string: chip.text, attributes: attribute)
+        guard !chip.deckname.isEmpty else { return text }
 
         var decknameAttribute = dekoration
         decknameAttribute[.foregroundColor] = farbe.blended(withFraction: 0.35, of: .labelColor) ?? farbe
         text.append(NSAttributedString(string: " → ", attributes: dekoration))
-        text.append(NSAttributedString(string: fund.platzhalter, attributes: decknameAttribute))
+        text.append(NSAttributedString(string: chip.deckname, attributes: decknameAttribute))
         return text
+    }
+
+    /// Löscht den Bereich, sobald die laufende Eingabe abgeschlossen ist.
+    /// Mitten in `shouldChangeText` darf der Speicher nicht angefasst werden.
+    static func loescheSpaeter(_ bereich: NSRange, in ansicht: NSTextView) {
+        DispatchQueue.main.async {
+            guard NSMaxRange(bereich) <= ansicht.string.utf16.count,
+                  ansicht.shouldChangeText(in: bereich, replacementString: "")
+            else { return }
+            ansicht.textStorage?.replaceCharacters(in: bereich, with: "")
+            ansicht.didChangeText()
+            ansicht.setSelectedRange(NSRange(location: bereich.location, length: 0))
+        }
     }
 
     // MARK: Zurückrechnen

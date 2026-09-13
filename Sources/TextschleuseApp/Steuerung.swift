@@ -254,8 +254,16 @@ final class Steuerung: NSObject, NSApplicationDelegate, NSMenuDelegate {
         fenster.submenu = fensterMenue
         leiste.addItem(fenster)
 
+        let hilfeMenue = NSMenu(title: "Hilfe")
+        hilfeMenue.addItem(withTitle: "Tastenkürzel …", action: #selector(zeigeTastenkuerzel), keyEquivalent: "/")
+            .target = self
+        let hilfe = NSMenuItem()
+        hilfe.submenu = hilfeMenue
+        leiste.addItem(hilfe)
+
         NSApp.mainMenu = leiste
         NSApp.windowsMenu = fensterMenue
+        NSApp.helpMenu = hilfeMenue
     }
 
     /// Alles, was in den Arbeitsflächen geht, auch als Menüpunkt.
@@ -368,6 +376,12 @@ final class Steuerung: NSObject, NSApplicationDelegate, NSMenuDelegate {
             eintrag.tag = platz
             menue.insertItem(eintrag, at: 0)
         }
+    }
+
+    /// Die Tastenkürzel-Übersicht über dem Fenster, das gerade vorn ist.
+    @objc func zeigeTastenkuerzel() {
+        let vorn = NSApp.keyWindow.flatMap { $0.contentView != nil ? $0 : nil }
+        Tastenkuerzel.zeige(ueber: vorn)
     }
 
     @objc private func zeigeUeber() {

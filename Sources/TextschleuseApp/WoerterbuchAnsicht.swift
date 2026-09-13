@@ -263,6 +263,17 @@ final class WoerterbuchAnsicht: NSView {
         // den Rest bekommen die Listen.
         editor.setContentHuggingPriority(.required, for: .vertical)
         links.setContentHuggingPriority(.defaultLow, for: .vertical)
+        if schmal {
+            // Der Editor hat keine eigene Höhe, nur seine Teile. Damit
+            // greift das Hugging nicht, und wer den Rest bekommt, entschied
+            // bisher der Zufall der Constraint-Reihenfolge — mal die Listen,
+            // mal der Editor. Der Wunsch „so niedrig wie möglich" mit
+            // kleinster Priorität macht es eindeutig: der Editor bleibt bei
+            // seinem Inhalt, die Listen wachsen.
+            let niedrig = editor.heightAnchor.constraint(equalToConstant: 0)
+            niedrig.priority = NSLayoutConstraint.Priority(1)
+            niedrig.isActive = true
+        }
         for kopf in [ueberschriftImText, ueberschriftAlle] {
             kopf.setContentHuggingPriority(.required, for: .vertical)
         }

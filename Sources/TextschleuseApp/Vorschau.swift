@@ -49,8 +49,13 @@ enum Vorschau {
             zeichne(popup, groesse: NSSize(width: 1000, height: 640), erscheinung: erscheinung,
                     nach: ziel.appendingPathComponent("popup-\(name).png"))
 
-            let antwort = "Sehr geehrter Herr PERSON_1, die Unterlagen von PERSON_9 zu "
-                + "AKTENZEICHEN_1 sind eingegangen. Rückfragen an EMAIL_1."
+            // Die Antwort mit den Decknamen aus der Analyse, plus einem, den
+            // niemand kennt.
+            let deckname: (Kategorie) -> String = { kategorie in
+                analyse.aktiveFunde.first { $0.kategorie == kategorie }?.platzhalter ?? "\(kategorie.praefix)_1"
+            }
+            let antwort = "Sehr geehrter Herr \(deckname(.person)), die Unterlagen von PERSON_9 zu "
+                + "\(deckname(.aktenzeichen)) sind eingegangen. Rückfragen an \(deckname(.email))."
             let rueckweg = RueckwegAnsicht(
                 ergebnis: Rueckweg.analysiere(antwort, woerterbuch: analyse.woerterbuch, unbekannte: analyse.unbekannte),
                 woerterbuch: analyse.woerterbuch,
@@ -58,6 +63,10 @@ enum Vorschau {
             )
             zeichne(rueckweg, groesse: NSSize(width: 1000, height: 640), erscheinung: erscheinung,
                     nach: ziel.appendingPathComponent("rueckweg-\(name).png"))
+
+            let blatt = Tastenkuerzel.baueInhalt()
+            zeichne(blatt, groesse: blatt.fittingSize, erscheinung: erscheinung,
+                    nach: ziel.appendingPathComponent("tastenkuerzel-\(name).png"))
 
             let sitzung = Sitzung()
             sitzung.beginne(analyse)

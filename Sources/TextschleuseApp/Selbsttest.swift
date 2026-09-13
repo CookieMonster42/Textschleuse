@@ -51,6 +51,8 @@ enum Selbsttest {
         fehler += pruefeFreiliste()
         fehler += pruefeZusatzKategorien()
         fehler += pruefeChipOhnePolster()
+        fehler += pruefeNormalesBearbeiten()
+        fehler += pruefeTastenkuerzelBlatt()
 
         print("")
         print(fehler == 0 ? "Alles in Ordnung." : "\(fehler) Punkt(e) fehlgeschlagen.")
@@ -548,16 +550,16 @@ enum Selbsttest {
         return fehler
     }
 
-    /// Das Hauptfenster: gibt es beide Reiter, ein Eingabefeld, und wird aus
-    /// eingefügtem Text eine Arbeitsfläche?
+    /// Das Hauptfenster: ein Textfeld, zwei Richtungen. Beim Umschalten
+    /// bleibt der Text stehen, die Verläufe bleiben getrennt.
     private static func pruefeHauptfenster() -> Int {
         var fehler = 0
-        var buch = Woerterbuch()
         var gesichert: Analyse?
+        let sitzung = Sitzung()
 
         let fenster = Hauptfenster(
-            woerterbuch: { buch },
-            sitzung: Sitzung(),
+            woerterbuch: { Woerterbuch() },
+            sitzung: sitzung,
             beimSchuetzen: { analyse, _ in gesichert = analyse },
             beimZurueckdrehen: { _ in }
         )
@@ -569,41 +571,75 @@ enum Selbsttest {
             return 1
         }
 
-        let reiter = reiterSuchen(in: inhalt)
-        if reiter?.numberOfTabViewItems == 2 {
-            print("✓ Hauptfenster: zwei Reiter, Schützen und Zurückdrehen")
+        if segmentSuchen(in: inhalt)?.segmentCount == 2 {
+            print("✓ Hauptfenster: ein Umschalter mit Schützen und Zurückdrehen")
         } else {
-            print("✗ Hauptfenster: \(reiter?.numberOfTabViewItems ?? -1) Reiter statt 2")
+            print("✗ Hauptfenster: kein Umschalter mit zwei Richtungen")
             fehler += 1
         }
 
-        // Ohne Text darf keine Arbeitsfläche entstehen.
-        if schutzflaecheSuchen(in: inhalt) == nil {
-            print("✓ Hauptfenster: startet mit dem Eingabefeld, nicht mit einer leeren Fläche")
-        } else {
-            print("✗ Hauptfenster: die Arbeitsfläche steht schon vor der Eingabe da")
-            fehler += 1
-        }
-
-        // Text einfügen und prüfen lassen.
-        guard let eingabe = eingabeSuchen(in: inhalt) else {
-            print("✗ Hauptfenster: kein Eingabefeld gefunden")
-            return fehler + 1
-        }
-        eingabe.setzeText("Herr Nyström schrieb an almut@example.org.")
-        eingabe.loeseAus()
-        fenster.window?.layoutIfNeeded()
-
+        // Die Arbeitsfläche steht von Anfang an da, leer, zum Einfügen.
         guard let flaeche = schutzflaecheSuchen(in: inhalt) else {
-            print("✗ Hauptfenster: nach dem Prüfen kommt keine Arbeitsfläche")
+            print("✗ Hauptfenster: keine Arbeitsfläche zum Schützen")
             return fehler + 1
         }
-        if flaeche.analyse.funde.isEmpty {
-            print("✗ Hauptfenster: die Arbeitsfläche hat keine Fundstellen")
-            fehler += 1
+        if flaeche.analyse.original.isEmpty {
+            print("✓ Hauptfenster: startet mit leerem Textfeld")
         } else {
-            print("✓ Hauptfenster: aus eingefügtem Text wird eine Arbeitsfläche "
-                + "mit \(flaeche.analyse.funde.count) Fundstellen")
+            print("✗ Hauptfenster: startet mit „\(flaeche.analyse.original)\"")
+            fehler += 1
+        }
+
+        let text = "Herr Nyström schrieb an almut@example.org."
+        flaeche.setzeTextFuerPruefung(text)
+        fenster.window?.layoutIfNeeded()
+        if flaeche.analyse.funde.count >= 2 {
+            print("✓ Hauptfenster: aus getipptem Text werden \(flaeche.analyse.funde.count) Fundstellen")
+        } else {
+            print("✗ Hauptfenster: getippter Text bringt \(flaeche.analyse.funde.count) Fundstellen")
+            fehler += 1
+        }
+        if sitzung.vorgaenge.count == 1 {
+            print("✓ Hauptfenster: der getippte Text steht im Verlauf")
+        } else {
+            print("✗ Hauptfenster: \(sitzung.vorgaenge.count) Vorgänge statt 1")
+            fehler += 1
+        }
+
+        // Umschalten: derselbe Text, jetzt im Rückweg.
+        fenster.wechsle(zu: .zurueckdrehen)
+        fenster.window?.layoutIfNeeded()
+        guard let rueckweg = rueckwegflaecheSuchen(in: inhalt) else {
+            print("✗ Hauptfenster: nach dem Umschalten keine Rückweg-Fläche")
+            return fehler + 1
+        }
+        if rueckweg.ergebnis.original == text {
+            print("✓ Hauptfenster: beim Umschalten bleibt der Text stehen")
+        } else {
+            print("✗ Hauptfenster: im Rückweg steht „\(rueckweg.ergebnis.original)\"")
+            fehler += 1
+        }
+        if schutzflaecheSuchen(in: inhalt) == nil {
+            print("✓ Hauptfenster: nur eine Fläche zur Zeit")
+        } else {
+            print("✗ Hauptfenster: beide Flächen zugleich im Fenster")
+            fehler += 1
+        }
+        if sitzung.rueckwegVorgaenge.count == 1, sitzung.vorgaenge.count == 1 {
+            print("✓ Hauptfenster: zwei getrennte Verläufe, je ein Eintrag")
+        } else {
+            print("✗ Hauptfenster: Verläufe \(sitzung.vorgaenge.count) / \(sitzung.rueckwegVorgaenge.count)")
+            fehler += 1
+        }
+
+        // Und zurück: derselbe Text, kein neuer Vorgang.
+        fenster.wechsle(zu: .schuetzen)
+        fenster.window?.layoutIfNeeded()
+        if flaeche.analyse.original == text, sitzung.vorgaenge.count == 1 {
+            print("✓ Hauptfenster: zurück zum Schützen mit demselben Text, ohne neuen Vorgang")
+        } else {
+            print("✗ Hauptfenster: zurück steht „\(flaeche.analyse.original)\", \(sitzung.vorgaenge.count) Vorgänge")
+            fehler += 1
         }
 
         // Übernehmen muss nach oben gemeldet werden.
@@ -614,8 +650,136 @@ enum Selbsttest {
             print("✗ Hauptfenster: Übernehmen kam nicht an")
             fehler += 1
         }
+        return fehler
+    }
 
-        _ = buch
+    /// Der Text lässt sich bearbeiten wie jeder andere: alles markieren und
+    /// löschen, hinter einem Chip ⌫ drücken. Nur mitten in einen Decknamen
+    /// tippen geht nicht.
+    private static func pruefeNormalesBearbeiten() -> Int {
+        var fehler = 0
+        let text = "Sehr geehrter Herr Nyström, Rückfragen an a@b.de."
+        let analyse = Schleuse.analysiere(text, woerterbuch: Woerterbuch())
+        let aufbau = Chiptext.aufbauen(analyse: analyse, ausgewaehlt: nil)
+        let alles = NSRange(location: 0, length: aufbau.text.length)
+
+        func regel(_ bereich: NSRange, _ ersatz: String) -> Chiptext.Aenderung {
+            Chiptext.pruefeAenderung(bereich: bereich, ersatz: ersatz, in: aufbau.text, chips: aufbau.bereiche)
+        }
+
+        if regel(alles, "") == .erlaubt {
+            print("✓ Bearbeiten: alles markieren und ⌫ ist erlaubt")
+        } else {
+            print("✗ Bearbeiten: alles markieren und ⌫ wird verweigert")
+            fehler += 1
+        }
+
+        guard let fund = analyse.funde.first(where: { $0.text.contains("Nyström") }),
+              let chip = aufbau.bereiche[fund.id]
+        else {
+            print("✗ Bearbeiten: Nyström nicht gefunden")
+            return fehler + 1
+        }
+        let letzter = NSRange(location: NSMaxRange(chip) - 1, length: 1)
+        if case .ausweiten(let ganz) = regel(letzter, ""), ganz == chip {
+            print("✓ Bearbeiten: ⌫ hinter dem Chip nimmt den ganzen Chip")
+        } else {
+            print("✗ Bearbeiten: ⌫ hinter dem Chip: \(regel(letzter, ""))")
+            fehler += 1
+        }
+        if regel(NSRange(location: NSMaxRange(chip) - 2, length: 0), "x") == .verboten {
+            print("✓ Bearbeiten: mitten im Decknamen tippen bleibt verboten")
+        } else {
+            print("✗ Bearbeiten: mitten im Decknamen darf man tippen")
+            fehler += 1
+        }
+        if regel(NSRange(location: chip.location, length: 0), "x") == .erlaubt {
+            print("✓ Bearbeiten: vor dem Chip tippen ist erlaubt")
+        } else {
+            print("✗ Bearbeiten: vor dem Chip tippen wird verweigert")
+            fehler += 1
+        }
+
+        // In der echten Ansicht: leeren durch Löschen.
+        let ansicht = SchutzAnsicht(analyse: analyse)
+        let fenster = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1000, height: 640),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        fenster.contentView = ansicht
+        fenster.layoutIfNeeded()
+        defer { fenster.orderOut(nil) }
+        if ansicht.darfAendernFuerPruefung(alles) {
+            print("✓ Bearbeiten: die Ansicht lässt Alles-löschen zu")
+        } else {
+            print("✗ Bearbeiten: die Ansicht sperrt Alles-löschen")
+            fehler += 1
+        }
+        ansicht.setzeTextFuerPruefung("")
+        if ansicht.analyse.original.isEmpty, ansicht.analyse.funde.isEmpty {
+            print("✓ Bearbeiten: danach ist der Text leer")
+        } else {
+            print("✗ Bearbeiten: nach dem Löschen steht noch „\(ansicht.analyse.original)\"")
+            fehler += 1
+        }
+
+        // Der Rückweg ist genauso bearbeitbar.
+        var buch = Woerterbuch()
+        _ = buch.anlegen(text: "Thorben Nyström", kategorie: .person)
+        let rueckweg = RueckwegAnsicht(ergebnis: Rueckweg.analysiere("", woerterbuch: buch), woerterbuch: buch)
+        fenster.contentView = rueckweg
+        fenster.layoutIfNeeded()
+        rueckweg.setzeTextFuerPruefung("Grüße an PERSON_1 und PERSON_9.")
+        if rueckweg.ergebnis.original == "Grüße an PERSON_1 und PERSON_9.", rueckweg.ergebnis.funde.count == 2 {
+            print("✓ Bearbeiten: getippter Text im Rückweg wird aufgelöst")
+        } else {
+            print("✗ Bearbeiten: im Rückweg steht „\(rueckweg.ergebnis.original)\" mit \(rueckweg.ergebnis.funde.count) Platzhaltern")
+            fehler += 1
+        }
+        let rueckwegAlles = NSRange(location: 0, length: (rueckweg.ergebnis.original as NSString).length + 20)
+        _ = rueckwegAlles
+        if rueckweg.darfAendernFuerPruefung(NSRange(location: 0, length: 3)) {
+            print("✓ Bearbeiten: im Rückweg lässt sich der Text ändern")
+        } else {
+            print("✗ Bearbeiten: der Rückweg-Text ist gesperrt")
+            fehler += 1
+        }
+        return fehler
+    }
+
+    /// Die Tastenkürzel-Übersicht: baut sich auf, nennt die eingestellten
+    /// Kurzbefehle, und jede Arbeitsfläche hat den Knopf dafür.
+    private static func pruefeTastenkuerzelBlatt() -> Int {
+        var fehler = 0
+        let inhalt = Tastenkuerzel.baueInhalt()
+        let texte = beschriftungenSammeln(in: inhalt)
+        let schuetzen = Einstellungen.gemeinsam.kurzbefehlSchuetzen.beschriftung
+        if texte.contains(schuetzen) {
+            print("✓ Tastenkürzel: das Blatt nennt den eingestellten Kurzbefehl \(schuetzen)")
+        } else {
+            print("✗ Tastenkürzel: der Kurzbefehl \(schuetzen) fehlt im Blatt")
+            fehler += 1
+        }
+        let knoepfe = knoepfeSammeln(in: inhalt).map(\.title)
+        if texte.contains("⌘⏎"), knoepfe.contains("Beim Start zeigen") {
+            print("✓ Tastenkürzel: Kopieren und das Start-Häkchen stehen drin")
+        } else {
+            print("✗ Tastenkürzel: Kopieren oder Start-Häkchen fehlen (\(knoepfe))")
+            fehler += 1
+        }
+
+        let schutz = SchutzAnsicht(analyse: Schleuse.analysiere("x", woerterbuch: Woerterbuch()))
+        let rueckweg = RueckwegAnsicht(ergebnis: Rueckweg.analysiere("x", woerterbuch: Woerterbuch()))
+        for (name, ansicht) in [("Schützen", schutz as NSView), ("Zurückdrehen", rueckweg)] {
+            if knoepfeSammeln(in: ansicht).contains(where: { $0.title == "Tastenkürzel" }) {
+                print("✓ Tastenkürzel: Knopf in der Fläche \(name)")
+            } else {
+                print("✗ Tastenkürzel: kein Knopf in der Fläche \(name)")
+                fehler += 1
+            }
+        }
         return fehler
     }
 
@@ -1787,8 +1951,10 @@ enum Selbsttest {
                 let sichtbareHoehe = rolle?.contentView.bounds.height ?? 0
                 let zeilenSichtbar = Int(sichtbareHoehe / max(1, alleTabelle.rowHeight))
                 let spaltenBreite = spalte.frame.width
-                print("   [Diagnose] Fenster \(Int(haupt.window?.frame.width ?? 0)) pt, "
-                    + "Spalte \(Int(spaltenBreite)) pt breit, "
+                let editor = editorSuchen(in: spalte)
+                print("   [Diagnose] Fenster \(Int(haupt.window?.frame.width ?? 0))×\(Int(haupt.window?.frame.height ?? 0)) pt, "
+                    + "Spalte \(Int(spaltenBreite))×\(Int(spalte.frame.height)) pt, "
+                    + "Editor \(Int(editor?.frame.height ?? -1)) (passend \(Int(editor?.fittingSize.height ?? -1))), "
                     + "Liste \(Int(rolle?.frame.width ?? 0))×\(Int(rolle?.frame.height ?? 0)), "
                     + "Ausschnitt \(Int(sichtbareHoehe)) pt = \(zeilenSichtbar) Zeilen, "
                     + "Spaltenbreite in der Tabelle \(Int(alleTabelle.tableColumns.reduce(0) { $0 + $1.width })) pt")
@@ -2053,20 +2219,18 @@ enum Selbsttest {
         return gefunden
     }
 
-    private static func reiterSuchen(in ansicht: NSView) -> NSTabView? {
-        if let treffer = ansicht as? NSTabView { return treffer }
+    private static func segmentSuchen(in ansicht: NSView) -> NSSegmentedControl? {
+        if let treffer = ansicht as? NSSegmentedControl { return treffer }
         for unter in ansicht.subviews {
-            if let treffer = reiterSuchen(in: unter) { return treffer }
+            if let treffer = segmentSuchen(in: unter) { return treffer }
         }
         return nil
     }
 
-    private static func eingabeSuchen(in ansicht: NSView) -> Eingabeflaeche? {
-        if let treffer = ansicht as? Eingabeflaeche, treffer.window != nil || treffer.superview != nil {
-            return treffer
-        }
+    private static func rueckwegflaecheSuchen(in ansicht: NSView) -> RueckwegAnsicht? {
+        if let treffer = ansicht as? RueckwegAnsicht { return treffer }
         for unter in ansicht.subviews {
-            if let treffer = eingabeSuchen(in: unter) { return treffer }
+            if let treffer = rueckwegflaecheSuchen(in: unter) { return treffer }
         }
         return nil
     }
