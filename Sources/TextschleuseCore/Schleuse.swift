@@ -54,7 +54,6 @@ public enum Schleuse {
         funde = funde.ohneUeberschneidungen()
 
         var unbekannte: [String: String] = [:]
-        var naechsteUnbekannt = 1
         var vergebeneUnbekannte: [String: String] = [:]  // Klartext → Platzhalter
 
         for index in funde.indices {
@@ -79,14 +78,16 @@ public enum Schleuse {
                 }
 
             case .heuristik:
-                // Unbestätigte Vermutungen bekommen eine laufende Nummer, die
+                // Unbestätigte Vermutungen bekommen eine Zufallskennung, die
                 // nur für diesen Text gilt.
                 let schluessel = funde[index].text.lowercased()
                 if let schon = vergebeneUnbekannte[schluessel] {
                     funde[index].platzhalter = schon
                 } else {
-                    let platzhalter = "\(Kategorie.unbekannt.praefix)_\(naechsteUnbekannt)"
-                    naechsteUnbekannt += 1
+                    let platzhalter = freierPlatzhalter(
+                        fuer: .unbekannt,
+                        belegt: Set(unbekannte.keys).union(arbeitsbuch.alleDecknamen)
+                    )
                     vergebeneUnbekannte[schluessel] = platzhalter
                     funde[index].platzhalter = platzhalter
                     unbekannte[platzhalter] = funde[index].text
@@ -199,22 +200,14 @@ public enum Schleuse {
             }
             guard !kollidiert else { continue }
 
-            // Auch der Nachschlag braucht eine Nummer, sonst steht er als
+            // Auch der Nachschlag braucht einen Decknamen, sonst steht er als
             // Klartext im Ergebnis.
-            let platzhalter = "\(Kategorie.unbekannt.praefix)_\(naechsteFreieUnbekannte(in: analyse))"
+            let platzhalter = freierPlatzhalter(fuer: .unbekannt, in: analyse)
             fund.platzhalter = platzhalter
             analyse.unbekannte[platzhalter] = fund.text
             analyse.funde.append(fund)
         }
         analyse.funde.sort { $0.bereich.location < $1.bereich.location }
-    }
-
-    private static func naechsteFreieUnbekannte(in analyse: Analyse) -> Int {
-        let benutzt = analyse.unbekannte.keys.compactMap { schluessel -> Int? in
-            guard schluessel.hasPrefix("\(Kategorie.unbekannt.praefix)_") else { return nil }
-            return Int(schluessel.dropFirst(Kategorie.unbekannt.praefix.count + 1))
-        }
-        return (benutzt.max() ?? 0) + 1
     }
 
     /// Hängt eine Vermutung als weitere Schreibweise an einen bekannten
@@ -444,14 +437,20 @@ public enum Schleuse {
     }
 
     /// Ein Platzhalter, der in diesem Text noch frei ist. Für Markierungen, die
-    /// nicht ins Wörterbuch sollen.
+    /// nicht ins Wörterbuch sollen, und für die Unbekannten.
     private static func freierPlatzhalter(fuer kategorie: Kategorie, in analyse: Analyse) -> String {
         let belegt = Set(analyse.funde.map(\.platzhalter))
             .union(analyse.unbekannte.keys)
             .union(analyse.woerterbuch.alleDecknamen)
-        var nummer = analyse.woerterbuch.naechsteNummern[kategorie.rawValue] ?? 1
-        while belegt.contains("\(kategorie.praefix)_\(nummer)") { nummer += 1 }
-        return "\(kategorie.praefix)_\(nummer)"
+        return freierPlatzhalter(fuer: kategorie, belegt: belegt)
+    }
+
+    private static func freierPlatzhalter(fuer kategorie: Kategorie, belegt: Set<String>) -> String {
+        var name: String
+        repeat {
+            name = "\(kategorie.praefix)_\(Decknamen.kennung(fuer: kategorie, belegt: belegt))"
+        } while belegt.contains(name)
+        return name
     }
 
     private static func uebernimmFuerGleichlautende(

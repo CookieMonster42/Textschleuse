@@ -214,7 +214,8 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
         NSLayoutConstraint.activate([
             mitte.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
             mitte.heightAnchor.constraint(greaterThanOrEqualToConstant: 200),
-            liste.widthAnchor.constraint(equalToConstant: 260),
+            // 300 statt 260: eine Zufallskennung ist achtzehn Stellen lang.
+            liste.widthAnchor.constraint(equalToConstant: 300),
             kopfzeileMitKlappe.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
             suche.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
             fuss.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
@@ -260,7 +261,7 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
         originalFeld.toolTip = "Korrigiert, was an dieser Stelle im Text steht. ⏎ übernimmt, ⎋ verwirft."
 
         decknameFeld.font = .monospacedSystemFont(ofSize: 13, weight: .medium)
-        decknameFeld.placeholderString = "PERSON_1"
+        decknameFeld.placeholderString = "PERSON_3F9A1C7B2E4D6A0B5C"
         decknameFeld.target = self
         decknameFeld.action = #selector(decknameUebernehmen)
         decknameFeld.delegate = self
@@ -286,7 +287,7 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
         fundstelleZeile.setCustomSpacing(18, after: decknameFeld)
         fundstelleZeile.alignment = .firstBaseline
         fundstelleZeile.translatesAutoresizingMaskIntoConstraints = false
-        for (feld, wunsch, mindestens) in [(originalFeld, 260, 130), (decknameFeld, 200, 110)] {
+        for (feld, wunsch, mindestens) in [(originalFeld, 240, 130), (decknameFeld, 270, 150)] {
             feld.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             let gern = feld.widthAnchor.constraint(equalToConstant: CGFloat(wunsch))
             // Unter 500: sonst schlägt der Wunsch die Fenstergröße, und das

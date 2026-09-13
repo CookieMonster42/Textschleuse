@@ -39,7 +39,7 @@ public enum Eintragsliste {
     }
 
     /// Alphabetisch, ohne Rücksicht auf Groß- und Kleinschreibung oder
-    /// Umlautpünktchen. Bei Gleichstand entscheidet die Nummer, damit die
+    /// Umlautpünktchen. Bei Gleichstand entscheidet die Kennung, damit die
     /// Reihenfolge stabil bleibt.
     public static func vorne(_ links: Eintrag, _ rechts: Eintrag) -> Bool {
         let vergleich = links.text.compare(
@@ -49,7 +49,7 @@ public enum Eintragsliste {
             locale: Locale(identifier: "de_DE")
         )
         if vergleich != .orderedSame { return vergleich == .orderedAscending }
-        return links.nummer < rechts.nummer
+        return links.kennung < rechts.kennung
     }
 
     /// Sucht in Hauptnennung, Schreibweisen und Deckname. Ein Eintrag, dessen

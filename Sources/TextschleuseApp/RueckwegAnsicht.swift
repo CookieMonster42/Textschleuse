@@ -132,7 +132,8 @@ final class RueckwegAnsicht: NSView, NSUserInterfaceValidations {
         NSLayoutConstraint.activate([
             mitte.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
             mitte.heightAnchor.constraint(greaterThanOrEqualToConstant: 260),
-            liste.widthAnchor.constraint(equalToConstant: 260),
+            // 300 statt 260: eine Zufallskennung ist achtzehn Stellen lang.
+            liste.widthAnchor.constraint(equalToConstant: 300),
             suche.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
             fuss.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
         ])
