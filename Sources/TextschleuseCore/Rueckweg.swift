@@ -91,19 +91,26 @@ public struct RueckwegErgebnis: Sendable {
 /// Auszeichnung drumherum bleibt stehen, ersetzt wird nur der Kern.
 public enum Rueckweg {
 
-    /// Das Muster für automatisch vergebene Namen: Kategoriekürzel, Nummer,
-    /// optional ein Aliasbuchstabe.
+    /// Das Muster für automatisch vergebene Namen: Kategoriekürzel, dann
+    /// entweder eine Zufallskennung (`PERSON_3F9A1C7B2E4D6A0B5C`) oder, aus
+    /// älteren Texten, eine Nummer mit optionalem Aliasbuchstaben
+    /// (`PERSON_7B`).
     ///
-    /// Danach dürfen beliebig viele weitere Abschnitte mit Unterstrich folgen.
-    /// Ein von Hand erweiterter Deckname wie `PERSON_1_MEIER_JR` muss ganz
-    /// erfasst werden; ohne die Fortsetzung griff nur `PERSON_1` und `_MEIER_JR`
-    /// blieb im zurückgedrehten Text stehen.
+    /// Die Kennung verlangt ein Trennzeichen, mindestens zwölf Stellen und
+    /// eine Ziffer darin. Ohne diese Hürde wäre „Firma Meier" ein
+    /// Platzhalter. Die alte Form darf wie bisher `PERSON 3` geschrieben sein.
+    ///
+    /// Danach dürfen beliebig viele weitere Abschnitte mit Unterstrich folgen:
+    /// der Aliasbuchstabe (`_B`) und von Hand erweiterte Decknamen wie
+    /// `PERSON_1_MEIER_JR`. Ohne die Fortsetzung griff nur `PERSON_1` und
+    /// `_MEIER_JR` blieb im zurückgedrehten Text stehen.
     static var muster: String {
         let praefixe = Kategorie.allCases
             .map { NSRegularExpression.escapedPattern(for: $0.praefix) }
             .sorted { $0.count > $1.count }
             .joined(separator: "|")
-        return "(?<![\\p{L}\\p{N}_])(\(praefixe))[ _\\-]?(\\d+)([A-Za-z]{0,3})"
+        return "(?<![\\p{L}\\p{N}_])(\(praefixe))"
+            + "(?:[ _\\-](?=[A-Za-z]*\\d)([A-Za-z0-9]{12,})|[ _\\-]?(\\d+[A-Za-z]{0,3}))"
             + "((?:_[\\p{L}\\p{N}]+)*)(?![\\p{L}\\p{N}_])"
     }
 
@@ -135,18 +142,18 @@ public enum Rueckweg {
 
         for treffer in RegexWerkzeug.treffer(muster, in: nsText, optionen: [.caseInsensitive]) {
             let praefix = nsText.substring(with: treffer.range(at: 1)).uppercased()
-            let nummer = nsText.substring(with: treffer.range(at: 2))
-            let suffixBereich = treffer.range(at: 3)
-            let suffix = suffixBereich.location == NSNotFound || suffixBereich.length == 0
-                ? ""
-                : nsText.substring(with: suffixBereich).uppercased()
+            // Gruppe 2 ist die Zufallskennung, Gruppe 3 die alte Nummer samt
+            // Buchstabe — es greift immer nur eine.
+            let kennungBereich = [treffer.range(at: 2), treffer.range(at: 3)]
+                .first { $0.location != NSNotFound && $0.length > 0 }
+            let kennung = kennungBereich.map { nsText.substring(with: $0).uppercased() } ?? ""
             let fortsetzungBereich = treffer.range(at: 4)
             let fortsetzung = fortsetzungBereich.location == NSNotFound
                 || fortsetzungBereich.length == 0
                 ? ""
                 : nsText.substring(with: fortsetzungBereich).uppercased()
 
-            let normal = "\(praefix)_\(nummer)\(suffix)\(fortsetzung)"
+            let normal = "\(praefix)_\(kennung)\(fortsetzung)"
             funde.append(PlatzhalterFund(
                 bereich: treffer.range,
                 geschrieben: nsText.substring(with: treffer.range),

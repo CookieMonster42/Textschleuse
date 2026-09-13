@@ -1,11 +1,11 @@
 import Foundation
 
 /// Eine andere Schreibweise derselben Sache. „Herr Nyström" hängt als Alias an
-/// „Thorben Nyström" und bekommt den Platzhalter `PERSON_7B`.
+/// „Thorben Nyström" und bekommt den Platzhalter `PERSON_3F9A1C7B2E4D6A0B5C_B`.
 public struct Alias: Codable, Identifiable, Hashable, Sendable {
     public var id: UUID
     public var text: String
-    /// Der Buchstabe hinter der Nummer: B, C, D …
+    /// Der Buchstabe hinter der Kennung: B, C, D …
     public var suffix: String
 
     public init(id: UUID = UUID(), text: String, suffix: String) {
@@ -15,14 +15,20 @@ public struct Alias: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
-/// Ein Begriff mit fester Nummer. Die Nummer bleibt dem Eintrag ein Leben lang
-/// erhalten und wird nach dem Löschen nicht neu vergeben.
+/// Ein Begriff mit fester Kennung. Sie bleibt dem Eintrag ein Leben lang
+/// erhalten und wird nach dem Löschen nie wieder vergeben.
 public struct Eintrag: Codable, Identifiable, Hashable, Sendable {
     public var id: UUID
     /// Die Hauptnennung, also die vollständigste Form: „Thorben Nyström".
     public var text: String
     public var kategorie: Kategorie
+    /// Die laufende Nummer aus der Zeit vor den Zufallskennungen. Neue
+    /// Einträge haben 0; alte behalten sie, damit `PERSON_7` in schon
+    /// verschickten Texten weiter aufgeht.
     public var nummer: Int
+    /// Was hinter dem Kategoriekürzel steht: `3F9A1C7B2E4D6A0B5C`, bei alten
+    /// Einträgen die Nummer als Text. Siehe `Decknamen`.
+    public var kennung: String
     public var aliase: [Alias]
     /// Aus einer Regel entstanden (IBAN, E-Mail …) statt von Hand gemerkt.
     public var automatischErkannt: Bool
@@ -41,7 +47,8 @@ public struct Eintrag: Codable, Identifiable, Hashable, Sendable {
         id: UUID = UUID(),
         text: String,
         kategorie: Kategorie,
-        nummer: Int,
+        nummer: Int = 0,
+        kennung: String? = nil,
         aliase: [Alias] = [],
         automatischErkannt: Bool = false,
         angelegt: Date = Date(),
@@ -52,6 +59,9 @@ public struct Eintrag: Codable, Identifiable, Hashable, Sendable {
         self.text = text
         self.kategorie = kategorie
         self.nummer = nummer
+        // Eine Nummer ohne Kennung ist der alte Weg: dann heißt der Eintrag
+        // weiter `PERSON_7`.
+        self.kennung = kennung ?? (nummer > 0 ? String(nummer) : Decknamen.kennung(fuer: kategorie))
         self.aliase = aliase
         self.automatischErkannt = automatischErkannt
         self.angelegt = angelegt
@@ -67,7 +77,10 @@ public struct Eintrag: Codable, Identifiable, Hashable, Sendable {
         id = try behaelter.decode(UUID.self, forKey: .id)
         text = try behaelter.decode(String.self, forKey: .text)
         kategorie = try behaelter.decode(Kategorie.self, forKey: .kategorie)
-        nummer = try behaelter.decode(Int.self, forKey: .nummer)
+        nummer = try behaelter.decodeIfPresent(Int.self, forKey: .nummer) ?? 0
+        // Dateien von vor den Zufallskennungen: die Nummer wird zur Kennung,
+        // die Decknamen bleiben dieselben.
+        kennung = try behaelter.decodeIfPresent(String.self, forKey: .kennung) ?? String(nummer)
         aliase = try behaelter.decodeIfPresent([Alias].self, forKey: .aliase) ?? []
         automatischErkannt = try behaelter.decodeIfPresent(Bool.self, forKey: .automatischErkannt) ?? false
         angelegt = try behaelter.decodeIfPresent(Date.self, forKey: .angelegt) ?? Date()
@@ -76,20 +89,31 @@ public struct Eintrag: Codable, Identifiable, Hashable, Sendable {
     }
 
     /// Der automatisch vergebene Name. Bleibt auch nach dem Umbenennen
-    /// erhalten, damit die Nummer nicht neu vergeben wird.
-    public var standardDeckname: String { "\(kategorie.praefix)_\(nummer)" }
+    /// erhalten, damit die Kennung nicht neu vergeben wird.
+    public var standardDeckname: String { "\(kategorie.praefix)_\(kennung)" }
 
     public var platzhalter: String { eigenerDeckname ?? standardDeckname }
 
+    /// `PERSON_3F9A1C7B2E4D6A0B5C_B`: der Buchstabe hängt mit Unterstrich an.
+    /// Direkt angehängt — `PERSON_7B` — war er bei einer Kennung aus
+    /// Ziffern und Buchstaben nicht mehr zu erkennen.
     public func platzhalter(fuer alias: Alias) -> String {
-        "\(platzhalter)\(alias.suffix)"
+        "\(platzhalter)_\(alias.suffix)"
+    }
+
+    /// Beide Schreibweisen eines Alias-Decknamens: die heutige mit
+    /// Unterstrich und die alte ohne, damit `PERSON_7B` aus einer älteren
+    /// Mail weiter aufgeht.
+    func aliasDecknamen(fuer name: String, _ alias: Alias) -> [String] {
+        ["\(name)_\(alias.suffix)", "\(name)\(alias.suffix)"]
     }
 
     /// Jeder Name, unter dem dieser Eintrag in einem Text stehen kann:
-    /// aktueller Deckname, frühere Decknamen, beides je Alias.
+    /// aktueller Deckname, frühere Decknamen, beides je Alias in alter und
+    /// neuer Schreibweise.
     public var alleDecknamen: [String] {
         var namen = [platzhalter] + fruehereDecknamen
-        for name in namen { namen += aliase.map { "\(name)\($0.suffix)" } }
+        for name in namen { namen += aliase.flatMap { aliasDecknamen(fuer: name, $0) } }
         return Array(Set(namen))
     }
 
@@ -221,24 +245,33 @@ public struct Woerterbuch: Codable, Sendable {
 
     // MARK: Anlegen und Ändern
 
-    /// Legt einen Eintrag an und vergibt die nächste freie Nummer seiner
-    /// Kategorie.
+    /// Legt einen Eintrag an, mit einer frischen Zufallskennung.
     @discardableResult
     public mutating func anlegen(
         text: String,
         kategorie: Kategorie,
         automatischErkannt: Bool = false
     ) -> Eintrag {
-        let nummer = naechsteNummern[kategorie.rawValue] ?? 1
-        naechsteNummern[kategorie.rawValue] = nummer + 1
         let eintrag = Eintrag(
             text: text,
             kategorie: kategorie,
-            nummer: nummer,
+            kennung: freieKennung(fuer: kategorie),
             automatischErkannt: automatischErkannt
         )
         eintraege.append(eintrag)
         return eintrag
+    }
+
+    /// Eine Kennung, deren Deckname noch nirgends im Wörterbuch vorkommt.
+    /// Bei Zufall ist das praktisch immer die erste; der Zähler der
+    /// Prüfungen springt über belegte Nummern.
+    func freieKennung(fuer kategorie: Kategorie) -> String {
+        let belegt = alleDecknamen
+        var kennung: String
+        repeat {
+            kennung = Decknamen.kennung(fuer: kategorie, belegt: belegt)
+        } while belegt.contains("\(kategorie.praefix)_\(kennung)")
+        return kennung
     }
 
     /// Hängt eine weitere Schreibweise an einen bestehenden Eintrag.
@@ -288,13 +321,13 @@ public struct Woerterbuch: Codable, Sendable {
         else { return }
 
         let bisher = eintraege[index].platzhalter
-        // Eine frische Nummer aus der neuen Kategorie, sonst kollidiert sie
-        // mit einem Eintrag, der dieselbe Nummer dort schon hat.
-        let nummer = naechsteNummern[kategorie.rawValue] ?? 1
-        naechsteNummern[kategorie.rawValue] = nummer + 1
+        // Eine frische Kennung: eine alte Nummer könnte in der neuen
+        // Kategorie schon vergeben sein.
+        let kennung = freieKennung(fuer: kategorie)
 
         eintraege[index].kategorie = kategorie
-        eintraege[index].nummer = nummer
+        eintraege[index].nummer = 0
+        eintraege[index].kennung = kennung
 
         if eintraege[index].platzhalter != bisher,
            !eintraege[index].fruehereDecknamen.contains(bisher) {
@@ -387,14 +420,15 @@ public struct Woerterbuch: Codable, Sendable {
     }
 
     /// Löst einen Platzhalter wieder in Klartext auf. `PERSON_7` liefert die
-    /// Hauptnennung, `PERSON_7B` den zugehörigen Alias. Frühere Decknamen
+    /// Hauptnennung, `PERSON_7_B` den zugehörigen Alias. Frühere Decknamen
     /// zählen mit, damit Antworten auf ältere Texte weiter aufgehen.
     public func klartext(fuerPlatzhalter platzhalter: String) -> String? {
         let gesucht = platzhalter.uppercased()
         for eintrag in eintraege {
             for name in [eintrag.platzhalter] + eintrag.fruehereDecknamen {
                 if name.uppercased() == gesucht { return eintrag.text }
-                for alias in eintrag.aliase where "\(name)\(alias.suffix)".uppercased() == gesucht {
+                for alias in eintrag.aliase
+                where eintrag.aliasDecknamen(fuer: name, alias).contains(where: { $0.uppercased() == gesucht }) {
                     return alias.text
                 }
             }
@@ -446,7 +480,8 @@ public struct Woerterbuch: Codable, Sendable {
                         istFrueherer: istFrueherer
                     )
                 }
-                for alias in eintrag.aliase where "\(name)\(alias.suffix)".uppercased() == gesucht {
+                for alias in eintrag.aliase
+                where eintrag.aliasDecknamen(fuer: name, alias).contains(where: { $0.uppercased() == gesucht }) {
                     return Aufloesung(
                         eintrag: eintrag,
                         klartext: alias.text,

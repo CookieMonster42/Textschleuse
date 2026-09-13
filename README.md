@@ -5,9 +5,11 @@ ein KI-Tool geht — und dreht die Antwort wieder zurück. Läuft komplett auf
 dem eigenen Mac, es geht nichts ins Netz.
 
 Aus `Sehr geehrter Herr Nyström, Ihre IBAN DE89 … stimmt.` wird
-`Sehr geehrter Herr PERSON_1, Ihre IBAN IBAN_1 stimmt.` Die Zuordnung liegt
-verschlüsselt im Wörterbuch auf dem Rechner. Kommt die Antwort zurück, werden
-die Platzhalter wieder zu den echten Namen.
+`Sehr geehrter Herr PERSON_3F9A1C7B2E4D6A0B5C, Ihre IBAN IBAN_A41C… stimmt.`
+Die Kennung hinter dem Kürzel ist Zufall, damit sich aus ihr nichts ablesen
+lässt — weder wie viele Einträge es gibt noch in welcher Reihenfolge sie
+entstanden. Die Zuordnung liegt verschlüsselt im Wörterbuch auf dem Rechner.
+Kommt die Antwort zurück, werden die Platzhalter wieder zu den echten Namen.
 
 ## Herunterladen
 

@@ -14,6 +14,8 @@ enum Selbsttest {
 
     static func laufen() -> Never {
         var fehler = 0
+        // Zähler statt Zufall, damit „PERSON_1" in den Prüfungen lesbar bleibt.
+        Decknamen.zaehleFuerPruefungen()
 
         print("Textschleuse Selbsttest")
         print("Programm: \(Bundle.main.bundlePath)")

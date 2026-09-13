@@ -1,6 +1,11 @@
 import Foundation
 import TextschleuseCore
 
+// Kennungen laufen hier als Zähler je Kategorie, nicht als Zufall: so heißt
+// der erste Eintrag PERSON_1 und die Erwartungen bleiben lesbar. Der Zufall
+// selbst wird ganz unten geprüft.
+Decknamen.zaehleFuerPruefungen()
+
 // Reihenfolge: erst die Regeln einzeln, dann die Heuristik, dann das
 // Zusammenspiel in Schleuse und Rückweg, zuletzt der Speicher.
 
@@ -280,7 +285,7 @@ Pruefstand.pruefe("Schleuse: Alias hängt an der Hauptnennung") {
     Schleuse.alsAliasZuordnen(fundId: kurz.id, zu: eintrag.id, in: &analyse)
     let geschuetzt = Schleuse.geschuetzterText(analyse)
     Pruefstand.enthaelt(geschuetzt, "PERSON_1", "Hauptnennung")
-    Pruefstand.enthaelt(geschuetzt, "PERSON_1B", "Kurzform als Unter-Platzhalter")
+    Pruefstand.enthaelt(geschuetzt, "PERSON_1_B", "Kurzform als Unter-Platzhalter")
     Pruefstand.enthaeltNicht(geschuetzt, "Bergkamp", "kein Klartext mehr übrig")
 }
 
@@ -423,14 +428,19 @@ Pruefstand.pruefe("Speicher: Klartext-Export und -Import") {
     }
 }
 
-Pruefstand.pruefe("Wörterbuch: gelöschte Nummern werden nicht neu vergeben") {
+Pruefstand.pruefe("Wörterbuch: gelöschte Kennungen werden nicht neu vergeben") {
+    // Mit Zufall statt Zähler: genau das ist der Grund, warum eine
+    // gelöschte Kennung nie wieder auftaucht.
+    Decknamen.zufallFuerAlle()
+    defer { Decknamen.zaehleFuerPruefungen() }
+
     var buch = Woerterbuch()
     let erster = buch.anlegen(text: "Anna Beispiel", kategorie: .person)
-    Pruefstand.gleich(erster.platzhalter, "PERSON_1", "erste Person")
+    Pruefstand.wahr(Decknamen.istZufallskennung(erster.kennung), "erste Person mit Zufallskennung")
 
     buch.loeschen(erster.id)
     let zweiter = buch.anlegen(text: "Bernd Beispiel", kategorie: .person)
-    Pruefstand.gleich(zweiter.platzhalter, "PERSON_2", "die 1 bleibt verbrannt")
+    Pruefstand.falsch(zweiter.platzhalter == erster.platzhalter, "die alte Kennung bleibt verbrannt")
 }
 
 // MARK: Decknamen
@@ -1748,6 +1758,74 @@ Pruefstand.pruefe("Speicher: räumt alte Sicherungen weg") {
         Speicher.sicherungenBehalten,
         "genau \(Speicher.sicherungenBehalten) Sicherungen bleiben liegen"
     )
+}
+
+
+// MARK: Zufallskennungen
+
+Pruefstand.pruefe("Zufallskennung: achtzehn Stellen, nichts abzulesen") {
+    Decknamen.zufallFuerAlle()
+    defer { Decknamen.zaehleFuerPruefungen() }
+
+    var buch = Woerterbuch()
+    let erster = buch.anlegen(text: "Thorben Nyström", kategorie: .person)
+    let zweiter = buch.anlegen(text: "Almut Weidenbach", kategorie: .person)
+
+    Pruefstand.wahr(erster.platzhalter.hasPrefix("PERSON_"), "Kürzel vorn")
+    Pruefstand.gleich(erster.kennung.count, Decknamen.kennungslaenge, "achtzehn Stellen")
+    Pruefstand.wahr(Decknamen.istZufallskennung(erster.kennung), "nur Großbuchstaben A–F und Ziffern")
+    Pruefstand.falsch(erster.kennung == zweiter.kennung, "zwei Einträge, zwei Kennungen")
+    Pruefstand.gleich(erster.nummer, 0, "keine laufende Nummer mehr")
+
+    var gesehen = Set<String>()
+    for _ in 0..<500 { gesehen.insert(Decknamen.zufallskennung()) }
+    Pruefstand.gleich(gesehen.count, 500, "fünfhundert Kennungen, keine doppelt")
+
+    // Der Rückweg findet die Kennung, auch wenn ein Modell ein Leerzeichen
+    // statt des Unterstrichs schreibt.
+    let alias = buch.aliasHinzufuegen("Nyström", zu: erster.id)!
+    let antwort = "Sehr geehrter Herr \(erster.platzhalter), \(erster.platzhalter(fuer: alias)) "
+        + "und \(zweiter.platzhalter.replacingOccurrences(of: "_", with: " ")) grüßen."
+    let zurueck = Rueckweg.analysiere(antwort, woerterbuch: buch)
+    Pruefstand.gleich(zurueck.funde.count, 3, "drei Platzhalter erkannt")
+    Pruefstand.gleich(zurueck.ergebnis, "Sehr geehrter Herr Thorben Nyström, Nyström und Almut Weidenbach grüßen.",
+                      "alle drei aufgelöst")
+
+    // Unbekannte tragen dieselbe Art Kennung.
+    let analyse = Schleuse.analysiere("Herr Zwickel ruft an.", woerterbuch: Woerterbuch())
+    let unbekannt = analyse.ungeprueft.first?.platzhalter ?? ""
+    Pruefstand.wahr(unbekannt.hasPrefix("UNBEKANNT_"), "Unbekannt mit Kürzel")
+    Pruefstand.wahr(Decknamen.istZufallskennung(String(unbekannt.dropFirst("UNBEKANNT_".count))),
+                    "Unbekannt mit Zufallskennung")
+}
+
+Pruefstand.pruefe("Zufallskennung: Prosa ist kein Platzhalter") {
+    let buch = Woerterbuch()
+    for satz in ["Die Firma Meier liefert.", "Bitte per EMAIL an Herrn Ort schicken.", "Person Nummer zwei"] {
+        let ergebnis = Rueckweg.analysiere(satz, woerterbuch: buch)
+        Pruefstand.gleich(ergebnis.funde.count, 0, "„\(satz)\" enthält keinen Platzhalter")
+    }
+    // Die alte Form mit Nummer bleibt ein Platzhalter, wie bisher.
+    Pruefstand.gleich(Rueckweg.analysiere("Frage an PERSON_4711.", woerterbuch: buch).funde.count, 1,
+                      "alte Nummernform wird weiter erkannt")
+}
+
+Pruefstand.pruefe("Alte Dateien: Nummern bleiben, Alias in beiden Schreibweisen") {
+    // Ein Eintrag, wie ihn eine Datei von vor den Zufallskennungen enthält.
+    let alt = """
+        {"id":"11111111-1111-1111-1111-111111111111","text":"Thorben Nyström","kategorie":"person",\
+        "nummer":7,"aliase":[{"id":"22222222-2222-2222-2222-222222222222","text":"Nyström","suffix":"B"}]}
+        """
+    guard let eintrag = try? JSONDecoder().decode(Eintrag.self, from: Data(alt.utf8)) else {
+        Pruefstand.wahr(false, "alter Eintrag lässt sich lesen")
+        return
+    }
+    Pruefstand.gleich(eintrag.platzhalter, "PERSON_7", "Deckname wie in den verschickten Texten")
+    let buch = Woerterbuch(eintraege: [eintrag])
+    Pruefstand.gleich(buch.klartext(fuerPlatzhalter: "PERSON_7B"), "Nyström", "alte Alias-Schreibweise geht auf")
+    Pruefstand.gleich(buch.klartext(fuerPlatzhalter: "PERSON_7_B"), "Nyström", "neue Alias-Schreibweise auch")
+    Pruefstand.gleich(Rueckweg.analysiere("An PERSON_7B und PERSON_7.", woerterbuch: buch).ergebnis,
+                      "An Nyström und Thorben Nyström.", "Rückweg mit alter Datei")
 }
 
 Pruefstand.bilanzUndEnde()
