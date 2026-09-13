@@ -27,8 +27,13 @@ final class RueckwegAnsicht: NSView, NSUserInterfaceValidations {
     private var rollflaeche: NSScrollView { flaeche.rolle }
     private let liste = Fundstellenliste()
     private lazy var suche = Textsuche(ziel: textAnsicht)
-    private let knopfleiste = NSStackView()
-    private let fusszeile = NSTextField(labelWithString: "")
+    /// Zwei beschriftete Reihen unter dem Text, wie beim Schützen: erst, was
+    /// mit dem Platzhalter geschehen soll, dann die Werkzeuge für den Text.
+    private let platzhalterLeiste = Fliessleiste()
+    private let werkzeugLeiste = Fliessleiste()
+    private var zuordnenKnopf = NSButton()
+    private var anlegenKnopf = NSButton()
+    private let fusszeile = NSTextField(wrappingLabelWithString: "")
     private let meldung = NSTextField(labelWithString: "")
     /// Wechselt zwischen „Ignorieren" und „Wieder beachten", je nachdem, was
     /// gerade ausgewählt ist.
@@ -93,46 +98,7 @@ final class RueckwegAnsicht: NSView, NSUserInterfaceValidations {
             self.window?.makeFirstResponder(self.textAnsicht)
         }
 
-        knopfleiste.orientation = .horizontal
-        knopfleiste.spacing = 6
-        let zuordnen = NSButton(title: "Zu Eintrag zuordnen …", target: self, action: #selector(zuordnen))
-        zuordnen.toolTip = "Sagt einmal, wer hinter diesem Platzhalter steckt. Gilt danach dauerhaft."
-        let anlegen = NSButton(title: "Als neuen Eintrag …", target: self, action: #selector(neuAnlegen))
-        anlegen.toolTip = "Legt den Klartext im Wörterbuch an und bindet den Platzhalter daran."
-        let neu = NSButton(title: "Neuer Text (⌘N)", target: self, action: #selector(neuEinlesen))
-        neu.toolTip = "Liest, was jetzt in der Zwischenablage liegt."
-        let kopieren = NSButton(title: "Ergebnis kopieren", target: self, action: #selector(aktionKopieren(_:)))
-        kopieren.keyEquivalent = "\r"
-        kopieren.toolTip = "⏎ macht dasselbe"
-        kopieren.bezelStyle = .rounded
-        knopfleiste.addArrangedSubview(kopieren)
-
-        let zurueckKnopf = NSButton(title: "↑", target: self, action: #selector(aktionVorigeFundstelle(_:)))
-        zurueckKnopf.toolTip = "Voriger Platzhalter (↑)"
-        let vorKnopf = NSButton(title: "↓", target: self, action: #selector(aktionNaechsteFundstelle(_:)))
-        vorKnopf.toolTip = "Nächster Platzhalter (↓)"
-        let suchKnopf = NSButton(title: "Suchen", target: self, action: #selector(aktionSuchen(_:)))
-        suchKnopf.toolTip = "Im Text suchen (⌘F)"
-        ignorierKnopf = NSButton(title: "Ignorieren (⌫)", target: self, action: #selector(aktionIgnorieren(_:)))
-        ignorierKnopf.toolTip = "Diesen Platzhalter beiseitelegen. Er bleibt im Text stehen, "
-            + "zählt aber nicht mehr als offener Punkt. Gilt für alle Stellen mit demselben Namen."
-
-        for knopf in [zurueckKnopf, vorKnopf, suchKnopf, zuordnen, anlegen, ignorierKnopf, neu] {
-            knopf.bezelStyle = .rounded
-            knopf.controlSize = .small
-            knopfleiste.addArrangedSubview(knopf)
-        }
-
-        meldung.font = .systemFont(ofSize: 11)
-        meldung.textColor = .systemRed
-        meldung.isHidden = true
-        knopfleiste.addArrangedSubview(meldung)
-
-        fusszeile.font = .systemFont(ofSize: 11)
-        fusszeile.textColor = .secondaryLabelColor
-        fusszeile.stringValue = "⏎ Kopieren · ↑ ↓ Platzhalter · ⌫ Ignorieren · ⌘F Suchen · "
-            + "⌘N Neuer Text · ⎋ Abbrechen. Was rot ist, kennt das Wörterbuch nicht — unten "
-            + "zuordnen, dann geht es dauerhaft auf, oder mit ⌫ beiseitelegen."
+        let fuss = baueFussbereich()
 
         let mitte = NSStackView(views: [rollflaeche, liste])
         mitte.orientation = .horizontal
@@ -140,11 +106,11 @@ final class RueckwegAnsicht: NSView, NSUserInterfaceValidations {
         mitte.distribution = .fill
         mitte.translatesAutoresizingMaskIntoConstraints = false
 
-        let stapel = NSStackView(views: [kopfzeile, warnzeile, suche, mitte, knopfleiste, fusszeile])
+        let stapel = NSStackView(views: [kopfzeile, warnzeile, suche, mitte, fuss])
         stapel.orientation = .vertical
         stapel.spacing = 10
         stapel.alignment = .leading
-        stapel.edgeInsets = NSEdgeInsets(top: 28, left: 18, bottom: 16, right: 18)
+        stapel.edgeInsets = NSEdgeInsets(top: 28, left: 18, bottom: 14, right: 18)
         stapel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stapel)
         NSLayoutConstraint.activate([
@@ -154,10 +120,11 @@ final class RueckwegAnsicht: NSView, NSUserInterfaceValidations {
             stapel.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
 
-        for zeile in [kopfzeile, warnzeile, fusszeile] {
+        for zeile in [kopfzeile, warnzeile] {
             zeile.setContentHuggingPriority(.required, for: .vertical)
         }
-        knopfleiste.setContentHuggingPriority(.required, for: .vertical)
+        fuss.setContentHuggingPriority(.required, for: .vertical)
+        fuss.setContentCompressionResistancePriority(.required, for: .vertical)
         suche.setContentHuggingPriority(.required, for: .vertical)
         mitte.setContentHuggingPriority(.defaultLow, for: .vertical)
         mitte.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
@@ -167,7 +134,127 @@ final class RueckwegAnsicht: NSView, NSUserInterfaceValidations {
             mitte.heightAnchor.constraint(greaterThanOrEqualToConstant: 260),
             liste.widthAnchor.constraint(equalToConstant: 260),
             suche.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
+            fuss.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
         ])
+    }
+
+    /// Der Bereich unter dem Text, gebaut wie beim Schützen: Trennlinie,
+    /// beschriftete Reihen, Tastenlegende.
+    private func baueFussbereich() -> NSView {
+        let trennlinie = NSBox()
+        trennlinie.boxType = .separator
+        trennlinie.translatesAutoresizingMaskIntoConstraints = false
+
+        // Reihe „Platzhalter": vor und zurück, dann die Entscheidungen.
+        let zurueckKnopf = Knoepfe.symbolknopf(
+            "chevron.up", beschreibung: "Voriger Platzhalter",
+            ziel: self, aktion: #selector(aktionVorigeFundstelle(_:)),
+            hilfe: "Voriger Platzhalter (↑)"
+        )
+        let vorKnopf = Knoepfe.symbolknopf(
+            "chevron.down", beschreibung: "Nächster Platzhalter",
+            ziel: self, aktion: #selector(aktionNaechsteFundstelle(_:)),
+            hilfe: "Nächster Platzhalter (↓)"
+        )
+        zuordnenKnopf = Knoepfe.knopf(
+            "Zu Eintrag zuordnen …", symbol: "link",
+            ziel: self, aktion: #selector(zuordnen),
+            hilfe: "Sagt einmal, wer hinter diesem Platzhalter steckt. Gilt danach dauerhaft."
+        )
+        anlegenKnopf = Knoepfe.knopf(
+            "Als neuen Eintrag …", symbol: "plus.circle",
+            ziel: self, aktion: #selector(neuAnlegen),
+            hilfe: "Legt den Klartext im Wörterbuch an und bindet den Platzhalter daran."
+        )
+        ignorierKnopf = Knoepfe.knopf(
+            "Ignorieren", symbol: "delete.left",
+            ziel: self, aktion: #selector(aktionIgnorieren(_:)),
+            hilfe: "Diesen Platzhalter beiseitelegen (⌫). Er bleibt im Text stehen, "
+                + "zählt aber nicht mehr als offener Punkt. Gilt für alle Stellen mit demselben Namen."
+        )
+        platzhalterLeiste.translatesAutoresizingMaskIntoConstraints = false
+        platzhalterLeiste.setze([
+            zurueckKnopf, vorKnopf, Gruppentrenner(), zuordnenKnopf, anlegenKnopf, ignorierKnopf,
+        ])
+
+        meldung.font = .systemFont(ofSize: 12)
+        meldung.textColor = .systemRed
+        meldung.lineBreakMode = .byTruncatingTail
+        meldung.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        // Reihe „Text": Werkzeuge, rechts das Kopieren als Abschluss.
+        let suchKnopf = Knoepfe.knopf(
+            "Suchen", symbol: "magnifyingglass",
+            ziel: self, aktion: #selector(aktionSuchen(_:)),
+            hilfe: "Im Text suchen (⌘F)"
+        )
+        let neu = Knoepfe.knopf(
+            "Neuer Text", symbol: "doc.on.clipboard",
+            ziel: self, aktion: #selector(neuEinlesen),
+            hilfe: "Liest, was jetzt in der Zwischenablage liegt (⌘N)."
+        )
+        werkzeugLeiste.translatesAutoresizingMaskIntoConstraints = false
+        werkzeugLeiste.setze([suchKnopf, neu])
+
+        let kopieren = Knoepfe.knopf(
+            "Ergebnis kopieren", symbol: "lock.open.fill",
+            ziel: self, aktion: #selector(aktionKopieren(_:)),
+            hilfe: "⏎ macht dasselbe"
+        )
+        kopieren.keyEquivalent = "\r"
+        if #available(macOS 26.0, *) {
+            kopieren.tintProminence = .primary
+        } else {
+            kopieren.bezelColor = .controlAccentColor
+        }
+        kopieren.setContentHuggingPriority(.required, for: .horizontal)
+        kopieren.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        let textZeile = NSStackView(views: [werkzeugLeiste, kopieren])
+        textZeile.orientation = .horizontal
+        textZeile.spacing = 16
+        textZeile.alignment = .firstBaseline
+        textZeile.translatesAutoresizingMaskIntoConstraints = false
+        werkzeugLeiste.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        fusszeile.font = .systemFont(ofSize: 12)
+        fusszeile.textColor = .tertiaryLabelColor
+        fusszeile.preferredMaxLayoutWidth = 900
+        fusszeile.stringValue = "⏎ kopiert · ↑ ↓ Platzhalter · ⌫ ignoriert · ⎋ bricht ab. "
+            + "Was rot ist, kennt das Wörterbuch nicht: zuordnen, dann geht es dauerhaft auf."
+
+        let etikettBreite: CGFloat = 84
+        var reihen: [NSStackView] = []
+        for (name, inhalt) in [
+            ("Platzhalter", platzhalterLeiste as NSView),
+            ("", meldung),
+            ("Text", textZeile),
+        ] {
+            let etikett = Knoepfe.etikett(name)
+            let reihe = NSStackView(views: [etikett, inhalt])
+            reihe.orientation = .horizontal
+            reihe.spacing = 12
+            reihe.alignment = .firstBaseline
+            reihe.translatesAutoresizingMaskIntoConstraints = false
+            etikett.widthAnchor.constraint(equalToConstant: etikettBreite).isActive = true
+            inhalt.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            reihen.append(reihe)
+        }
+
+        let fuss = NSStackView(views: [trennlinie] + reihen + [fusszeile])
+        fuss.orientation = .vertical
+        fuss.spacing = 10
+        fuss.alignment = .leading
+        fuss.setCustomSpacing(14, after: trennlinie)
+        fuss.setCustomSpacing(4, after: reihen[0])
+        fuss.setCustomSpacing(14, after: reihen[2])
+        fuss.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate(
+            [trennlinie.widthAnchor.constraint(equalTo: fuss.widthAnchor),
+             fusszeile.widthAnchor.constraint(equalTo: fuss.widthAnchor)]
+            + reihen.map { $0.widthAnchor.constraint(equalTo: fuss.widthAnchor) }
+        )
+        return fuss
     }
 
     // MARK: Darstellung
@@ -202,18 +289,13 @@ final class RueckwegAnsicht: NSView, NSUserInterfaceValidations {
     private func aktualisiereKnoepfe() {
         let fund = aktuellerFund
         let offen = fund?.istAufloesbar == false
-        for ansicht in knopfleiste.arrangedSubviews {
-            guard let knopf = ansicht as? NSButton else { continue }
-            if knopf.title.hasPrefix("Zu Eintrag") {
-                knopf.isEnabled = offen && !woerterbuch.eintraege.isEmpty
-            } else if knopf.title.hasPrefix("Als neuen") {
-                knopf.isEnabled = offen
-            }
-        }
+        zuordnenKnopf.isEnabled = offen && !woerterbuch.eintraege.isEmpty
+        anlegenKnopf.isEnabled = offen
         // Aufgelöste Platzhalter lassen sich nicht beiseitelegen — sie sind
         // ja schon beantwortet.
         ignorierKnopf.isEnabled = offen
-        ignorierKnopf.title = fund?.ignoriert == true ? "Wieder beachten (⌫)" : "Ignorieren (⌫)"
+        ignorierKnopf.title = fund?.ignoriert == true ? "Wieder beachten" : "Ignorieren"
+        Knoepfe.setze(symbol: fund?.ignoriert == true ? "eye" : "delete.left", auf: ignorierKnopf)
     }
 
     /// Legt den ausgewählten Platzhalter beiseite oder holt ihn zurück.
