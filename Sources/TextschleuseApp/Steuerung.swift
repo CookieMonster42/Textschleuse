@@ -3,7 +3,7 @@ import TextschleuseCore
 
 /// Hält alles zusammen: Menüleistensymbol, Kurzbefehle, Wörterbuch und die
 /// beiden Popups.
-final class Steuerung: NSObject, NSApplicationDelegate {
+final class Steuerung: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private var statusSymbol: NSStatusItem?
     private let speicher = Speicher()
@@ -267,15 +267,10 @@ final class Steuerung: NSObject, NSApplicationDelegate {
     private func baueAktionenmenue() -> NSMenuItem {
         let aktionen = NSMenuItem()
         let menue = NSMenu(title: "Aktionen")
-
-        for (index, kategorie) in Kategorie.schnellwahl.enumerated() {
-            let eintrag = menue.addItem(
-                withTitle: "Als \(kategorie.anzeigename) schützen",
-                action: Selector(("aktionKategorie:")),
-                keyEquivalent: "\(index + 1)"
-            )
-            eintrag.tag = index
-        }
+        // Die Kategorien kommen erst beim Öffnen hinein, siehe
+        // `menuNeedsUpdate`: mit einer zugeschalteten Erkennung wächst die
+        // Reihe, und das Menü soll dieselbe zeigen wie die Leiste im Fenster.
+        menue.delegate = self
         menue.addItem(.separator())
 
         let mitTaste: [(String, String, NSEvent.ModifierFlags)] = [
@@ -352,6 +347,27 @@ final class Steuerung: NSObject, NSApplicationDelegate {
 
         aktionen.submenu = menue
         return aktionen
+    }
+
+    /// Schreibt die Kategorien vorn ins Menü „Aktionen" — bei jedem Öffnen
+    /// neu, mit dem Stand des Wörterbuchs. Der Tag ist der Platz in der
+    /// Reihe; die Ansicht übersetzt ihn zurück.
+    func menuNeedsUpdate(_ menue: NSMenu) {
+        guard menue.title == "Aktionen" else { return }
+        for alt in menue.items where alt.action == Selector(("aktionKategorie:")) {
+            menue.removeItem(alt)
+        }
+        for (platz, kategorie) in Kategorie.zurWahl(mit: woerterbuch).enumerated().reversed() {
+            let eintrag = NSMenuItem(
+                title: "Als \(kategorie.anzeigename) schützen",
+                action: Selector(("aktionKategorie:")),
+                // ⌘0 gehört schon „Fenster zeigen"; der zehnte Platz hat
+                // deshalb nur die nackte Ziffer bei markiertem Text.
+                keyEquivalent: platz < 9 ? (Kategorie.taste(fuerPlatz: platz) ?? "") : ""
+            )
+            eintrag.tag = platz
+            menue.insertItem(eintrag, at: 0)
+        }
     }
 
     @objc private func zeigeUeber() {

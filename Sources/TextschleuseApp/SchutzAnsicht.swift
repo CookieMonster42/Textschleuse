@@ -64,23 +64,36 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
     var beiWoerterbuchAenderung: ((Woerterbuch) -> Void)?
     private var mitte = NSStackView()
 
-    /// Zwei Reihen übereinander: oben die Kategorien und das Kopieren, unten
-    /// die Werkzeuge. In einer Reihe wären es fünfzehn Knöpfe und 1270 Punkte
-    /// Mindestbreite — daran hing bisher die Fensterbreite.
-    private let knopfleiste = NSStackView()
-    private let knopfreiheOben = NSStackView()
-    private let knopfreiheUnten = NSStackView()
+    /// Der Fußbereich: drei beschriftete Reihen unter dem Text. „Schützen
+    /// als" mit den Kategorien, „Fundstelle" mit Original und Deckname, „Text"
+    /// mit den Werkzeugen und dem Kopieren. Die Reihen brechen um, statt das
+    /// Fenster breit zu zwingen — mit zugeschalteten Erkennungen sind es bis
+    /// zu zehn Kategorien.
+    private let kategorienLeiste = Fliessleiste()
+    private let werkzeugLeiste = Fliessleiste()
+    /// Die Kategorien, für die gerade Knöpfe stehen. Ändert sich, sobald in
+    /// den Einstellungen eine Erkennung zu- oder abgeschaltet wird.
+    private var gebauteKategorien: [Kategorie] = []
+    private var kategorieKnoepfe: [NSButton] = []
+    private var verwerfenKnopf = NSButton()
+    private var gruppeKnopf = NSButton()
+    private var zurueckKnopf = NSButton()
+    private var vorKnopf = NSButton()
+    private var kopierenKnopf = NSButton()
     /// Die Knöpfe, die eine ausgewählte Fundstelle brauchen. Kopieren, Leeren
     /// oder Suchen gehören nicht dazu — die gehen immer.
-    private var stellenKnoepfe: [NSButton] = []
+    private var stellenKnoepfe: [NSButton] {
+        kategorieKnoepfe + [verwerfenKnopf, gruppeKnopf, zurueckKnopf, vorKnopf]
+    }
     private let originalFeld = NSTextField()
     private let originalEtikett = NSTextField(labelWithString: "Original")
     private let decknameFeld = NSTextField()
     private let decknameEtikett = NSTextField(labelWithString: "Deckname")
     private let merkenHaken = NSButton(checkboxWithTitle: "dauerhaft merken", target: nil, action: nil)
+    /// Die Rückmeldung unter den Feldern. Steht immer da, auch leer — sonst
+    /// springt der Fußbereich bei jeder Meldung um eine Zeile.
     private let meldung = NSTextField(labelWithString: "")
-    /// Die Tastenlegende. Umbrechend, nicht einzeilig: in einer Zeile ist sie
-    /// 1200 Punkte breit und zwingt das ganze Fenster auf diese Breite.
+    /// Die Tasten, die an keinem Knopf stehen.
     private let fusszeile = NSTextField(wrappingLabelWithString: "")
 
     init(analyse: Analyse) {
@@ -145,54 +158,6 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
             self.window?.makeFirstResponder(self.textAnsicht)
         }
 
-        for reihe in [knopfreiheOben, knopfreiheUnten] {
-            reihe.orientation = .horizontal
-            reihe.spacing = 6
-            reihe.alignment = .centerY
-        }
-        knopfleiste.orientation = .vertical
-        knopfleiste.spacing = 6
-        knopfleiste.alignment = .leading
-        knopfleiste.addArrangedSubview(knopfreiheOben)
-        knopfleiste.addArrangedSubview(knopfreiheUnten)
-        baueKnoepfe()
-
-        originalEtikett.font = .systemFont(ofSize: 11)
-        originalEtikett.textColor = .secondaryLabelColor
-        originalFeld.font = .systemFont(ofSize: 12)
-        originalFeld.placeholderString = "so steht es im Text"
-        originalFeld.target = self
-        originalFeld.action = #selector(originalUebernehmen)
-        originalFeld.delegate = self
-        originalFeld.toolTip = "Korrigiert, was an dieser Stelle im Text steht. ⏎ übernimmt, ⎋ verwirft."
-
-        decknameEtikett.font = .systemFont(ofSize: 11)
-        decknameEtikett.textColor = .secondaryLabelColor
-        decknameFeld.font = .monospacedSystemFont(ofSize: 12, weight: .medium)
-        decknameFeld.placeholderString = "PERSON_1"
-        decknameFeld.target = self
-        decknameFeld.action = #selector(decknameUebernehmen)
-        decknameFeld.delegate = self
-        decknameFeld.toolTip = "Großbuchstaben, Ziffern, Unterstrich. ⏎ übernimmt, ⎋ verwirft."
-
-        merkenHaken.state = .on
-        merkenHaken.font = .systemFont(ofSize: 12)
-        merkenHaken.target = self
-        merkenHaken.action = #selector(merkenGeaendert)
-        merkenHaken.toolTip = "Aus heißt: der Deckname gilt nur für diesen Text."
-
-        meldung.font = .systemFont(ofSize: 11)
-        meldung.textColor = .systemRed
-        meldung.lineBreakMode = .byTruncatingTail
-        meldung.isHidden = true
-
-        fusszeile.font = .systemFont(ofSize: 11)
-        fusszeile.textColor = .secondaryLabelColor
-        fusszeile.preferredMaxLayoutWidth = 620
-        fusszeile.stringValue = "1–5 Kategorie, dann Deckname tippen und ⏎ · ⏎ im Text Kopieren · "
-            + "⌘⏎ Kopieren und alles merken · ↑ ↓ Fundstelle · ⌫ Verwerfen · G Zur Gruppe · "
-            + "⌘E Text bearbeiten · ⌘F Suchen · ⌘N Neuer Text · ⎋ Abbrechen"
-
         // Der Text ist direkt bearbeitbar. Was dasteht, ist der Originaltext;
         // die Fundstellen sind nur eingefärbt, es wird nichts dazwischen
         // geschoben. Nur so kann man tippen, ohne die Zuordnung zu zerreißen.
@@ -213,25 +178,18 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
         mitte.distribution = .fill
         mitte.translatesAutoresizingMaskIntoConstraints = false
 
-        let decknameZeile = NSStackView(views: [
-            originalEtikett, originalFeld, decknameEtikett, decknameFeld, merkenHaken, meldung,
-        ])
-        decknameZeile.orientation = .horizontal
-        decknameZeile.spacing = 8
-        decknameZeile.translatesAutoresizingMaskIntoConstraints = false
-
         let kopfzeileMitKlappe = NSStackView(views: [kopfzeile, NSView(), klappeKnopf])
         kopfzeileMitKlappe.orientation = .horizontal
         kopfzeileMitKlappe.spacing = 8
         kopfzeileMitKlappe.translatesAutoresizingMaskIntoConstraints = false
 
-        let stapel = NSStackView(views: [
-            kopfzeileMitKlappe, regelzeile, suche, mitte, knopfleiste, decknameZeile, fusszeile,
-        ])
+        let fuss = baueFussbereich()
+
+        let stapel = NSStackView(views: [kopfzeileMitKlappe, regelzeile, suche, mitte, fuss])
         stapel.orientation = .vertical
         stapel.spacing = 10
         stapel.alignment = .leading
-        stapel.edgeInsets = NSEdgeInsets(top: 28, left: 18, bottom: 16, right: 18)
+        stapel.edgeInsets = NSEdgeInsets(top: 28, left: 18, bottom: 14, right: 18)
 
         stapel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stapel)
@@ -242,88 +200,264 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
             stapel.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
 
-        for zeile in [kopfzeile, regelzeile, fusszeile] {
+        for zeile in [kopfzeile, regelzeile] {
             zeile.setContentHuggingPriority(.required, for: .vertical)
         }
         kopfzeileMitKlappe.setContentHuggingPriority(.required, for: .vertical)
-        for teil in [knopfleiste, decknameZeile, suche] {
+        for teil in [fuss, suche] {
             teil.setContentHuggingPriority(.required, for: .vertical)
+            teil.setContentCompressionResistancePriority(.required, for: .vertical)
         }
         mitte.setContentHuggingPriority(.defaultLow, for: .vertical)
         mitte.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
-        decknameFeld.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        originalFeld.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
         NSLayoutConstraint.activate([
             mitte.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
             mitte.heightAnchor.constraint(greaterThanOrEqualToConstant: 200),
             liste.widthAnchor.constraint(equalToConstant: 260),
-            decknameZeile.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
             kopfzeileMitKlappe.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
             suche.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
-            fusszeile.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
-            decknameFeld.widthAnchor.constraint(greaterThanOrEqualToConstant: 150),
-            originalFeld.widthAnchor.constraint(greaterThanOrEqualToConstant: 170),
+            fuss.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
         ])
     }
 
-    private func baueKnoepfe() {
-        knopfreiheOben.setViews([], in: .leading)
-        knopfreiheUnten.setViews([], in: .leading)
-        stellenKnoepfe = []
-        for (index, kategorie) in Kategorie.schnellwahl.enumerated() {
-            let knopf = NSButton(
-                title: "\(kategorie.anzeigename) (\(index + 1))",
-                target: self,
-                action: #selector(kategorieGeklickt(_:))
-            )
-            knopf.tag = index
-            knopf.bezelStyle = .rounded
-            knopf.controlSize = .small
-            knopf.toolTip = "Text markieren, dann \(index + 1) drücken — oder ⌘\(index + 1) ohne Markierung"
-            knopfreiheOben.addArrangedSubview(knopf)
-            stellenKnoepfe.append(knopf)
+    /// Der Bereich unter dem Text.
+    ///
+    /// Drei beschriftete Reihen, damit man auf einen Blick sieht, was wozu
+    /// gehört: was mit der Stelle geschehen soll, wie sie heißt, und was mit
+    /// dem Text als Ganzem passiert. Vorher standen fünfzehn kleine Knöpfe in
+    /// zwei Reihen, die Taste in Klammern im Titel — zu klein, zu eng.
+    private func baueFussbereich() -> NSView {
+        let trennlinie = NSBox()
+        trennlinie.boxType = .separator
+        trennlinie.translatesAutoresizingMaskIntoConstraints = false
+
+        // Reihe „Schützen als": die Kategorien, dahinter Verwerfen und Zuordnen.
+        verwerfenKnopf = Knoepfe.knopf(
+            "Verwerfen", symbol: "delete.left",
+            ziel: self, aktion: #selector(verwerfenGeklickt),
+            hilfe: "Diese Stelle bleibt im Klartext stehen. ⌫ in der Liste macht dasselbe."
+        )
+        gruppeKnopf = Knoepfe.knopf(
+            "Gehört zu …", symbol: "d.square",
+            ziel: self, aktion: #selector(gruppeGeklickt),
+            hilfe: "Als weitere Schreibweise an einen bekannten Eintrag hängen. "
+                + "D bei markiertem Text, sonst ⌘D."
+        )
+        kategorienLeiste.translatesAutoresizingMaskIntoConstraints = false
+        baueKategorieKnoepfe()
+
+        // Reihe „Fundstelle": Original, Deckname, merken.
+        for etikett in [originalEtikett, decknameEtikett] {
+            etikett.font = .systemFont(ofSize: 13)
+            etikett.textColor = .secondaryLabelColor
+        }
+        originalFeld.font = .systemFont(ofSize: 13)
+        originalFeld.placeholderString = "so steht es im Text"
+        originalFeld.target = self
+        originalFeld.action = #selector(originalUebernehmen)
+        originalFeld.delegate = self
+        originalFeld.toolTip = "Korrigiert, was an dieser Stelle im Text steht. ⏎ übernimmt, ⎋ verwirft."
+
+        decknameFeld.font = .monospacedSystemFont(ofSize: 13, weight: .medium)
+        decknameFeld.placeholderString = "PERSON_1"
+        decknameFeld.target = self
+        decknameFeld.action = #selector(decknameUebernehmen)
+        decknameFeld.delegate = self
+        decknameFeld.toolTip = "Großbuchstaben, Ziffern, Unterstrich. ⏎ übernimmt, ⎋ verwirft."
+
+        merkenHaken.state = .on
+        merkenHaken.font = .systemFont(ofSize: 13)
+        merkenHaken.target = self
+        merkenHaken.action = #selector(merkenGeaendert)
+        merkenHaken.toolTip = "Aus heißt: der Deckname gilt nur für diesen Text."
+
+        // Der Rest der Zeile bleibt leer, statt dass die Felder bis zum Rand
+        // wachsen: ein 800 Punkte breites Feld für „Nyström" sieht verloren
+        // aus. Wird es eng, geben die Felder bis auf ein Mindestmaß nach.
+        let rest = NSView()
+        rest.setContentHuggingPriority(NSLayoutConstraint.Priority(100), for: .horizontal)
+        let fundstelleZeile = NSStackView(views: [
+            originalEtikett, originalFeld, decknameEtikett, decknameFeld, merkenHaken, rest,
+        ])
+        fundstelleZeile.orientation = .horizontal
+        fundstelleZeile.spacing = 8
+        fundstelleZeile.setCustomSpacing(18, after: originalFeld)
+        fundstelleZeile.setCustomSpacing(18, after: decknameFeld)
+        fundstelleZeile.alignment = .firstBaseline
+        fundstelleZeile.translatesAutoresizingMaskIntoConstraints = false
+        for (feld, wunsch, mindestens) in [(originalFeld, 260, 130), (decknameFeld, 200, 110)] {
+            feld.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            let gern = feld.widthAnchor.constraint(equalToConstant: CGFloat(wunsch))
+            // Unter 500: sonst schlägt der Wunsch die Fenstergröße, und das
+            // Fenster ließe sich nicht mehr schmaler ziehen als diese Zeile.
+            gern.priority = NSLayoutConstraint.Priority(400)
+            NSLayoutConstraint.activate([
+                gern,
+                feld.widthAnchor.constraint(greaterThanOrEqualToConstant: CGFloat(mindestens)),
+            ])
         }
 
-        let kopieren = NSButton(title: "Geschützten Text kopieren", target: self, action: #selector(kopierenGeklickt))
-        kopieren.bezelStyle = .rounded
-        kopieren.controlSize = .regular
-        kopieren.keyEquivalent = "\r"
-        kopieren.keyEquivalentModifierMask = [.command]
-        kopieren.toolTip = "⌘⏎ macht dasselbe und merkt dabei alle offenen Vermutungen"
-        knopfreiheOben.addArrangedSubview(kopieren)
+        meldung.font = .systemFont(ofSize: 12)
+        meldung.textColor = .secondaryLabelColor
+        meldung.lineBreakMode = .byTruncatingTail
+        meldung.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let verwerfen = NSButton(title: "Verwerfen", target: self, action: #selector(verwerfenGeklickt))
-        verwerfen.toolTip = "Diese Stelle bleibt im Klartext stehen"
-        let gruppe = NSButton(title: "Gehört zu … (D)", target: self, action: #selector(gruppeGeklickt))
-        gruppe.toolTip = "Als weitere Schreibweise an einen bekannten Eintrag hängen. D bei markiertem Text, sonst ⌘D."
-        let neu = NSButton(title: "Neuer Text (⌘N)", target: self, action: #selector(neuEinlesen))
-        neu.toolTip = "Liest, was jetzt in der Zwischenablage liegt. Der bisherige Text wird verworfen."
-        vorschauKnopf = NSButton(title: "Nur Text (⌘E)", target: self, action: #selector(vorschauUmschalten))
-        vorschauKnopf.toolTip = "Blendet die Decknamen im Text aus. Bearbeiten geht in beiden Fällen."
-        let leeren = NSButton(title: "Leeren", target: self, action: #selector(leeren))
-        leeren.toolTip = "Wirft den Text weg. Das Wörterbuch bleibt."
-        let zurueckKnopf = NSButton(title: "↑", target: self, action: #selector(aktionVorigeFundstelle(_:)))
-        zurueckKnopf.toolTip = "Vorige Fundstelle (⌥↑)"
-        let vorKnopf = NSButton(title: "↓", target: self, action: #selector(aktionNaechsteFundstelle(_:)))
-        vorKnopf.toolTip = "Nächste Fundstelle (⌥↓)"
-        let suchKnopf = NSButton(title: "Suchen", target: self, action: #selector(aktionSuchen(_:)))
-        suchKnopf.toolTip = "Im Text suchen (⌘F)"
-        let widerrufKnopf = NSButton(title: "Widerrufen", target: self, action: #selector(undo(_:)))
-        widerrufKnopf.toolTip = "Letzte Änderung zurücknehmen (⌘Z)"
+        // Reihe „Text": Fundstelle vor und zurück, die Werkzeuge, ganz rechts
+        // das Kopieren als Abschluss.
+        zurueckKnopf = Knoepfe.symbolknopf(
+            "chevron.up", beschreibung: "Vorige Fundstelle",
+            ziel: self, aktion: #selector(aktionVorigeFundstelle(_:)),
+            hilfe: "Vorige Fundstelle (⌥↑)"
+        )
+        vorKnopf = Knoepfe.symbolknopf(
+            "chevron.down", beschreibung: "Nächste Fundstelle",
+            ziel: self, aktion: #selector(aktionNaechsteFundstelle(_:)),
+            hilfe: "Nächste Fundstelle (⌥↓)"
+        )
+        let suchKnopf = Knoepfe.knopf(
+            "Suchen", symbol: "magnifyingglass",
+            ziel: self, aktion: #selector(aktionSuchen(_:)),
+            hilfe: "Im Text suchen (⌘F)"
+        )
+        let widerrufKnopf = Knoepfe.knopf(
+            "Widerrufen", symbol: "arrow.uturn.backward",
+            ziel: self, aktion: #selector(undo(_:)),
+            hilfe: "Letzte Änderung zurücknehmen (⌘Z)"
+        )
+        vorschauKnopf = Knoepfe.knopf(
+            "Nur Text", symbol: "eye.slash",
+            ziel: self, aktion: #selector(vorschauUmschalten),
+            hilfe: "Blendet die Decknamen im Text aus (⌘E). Bearbeiten geht in beiden Fällen."
+        )
+        let leeren = Knoepfe.knopf(
+            "Leeren", symbol: "trash",
+            ziel: self, aktion: #selector(leeren),
+            hilfe: "Wirft den Text weg. Das Wörterbuch bleibt."
+        )
+        let neu = Knoepfe.knopf(
+            "Neuer Text", symbol: "doc.on.clipboard",
+            ziel: self, aktion: #selector(neuEinlesen),
+            hilfe: "Liest, was jetzt in der Zwischenablage liegt (⌘N). Der bisherige Text wird verworfen."
+        )
+        werkzeugLeiste.translatesAutoresizingMaskIntoConstraints = false
+        werkzeugLeiste.setze([
+            zurueckKnopf, vorKnopf, Gruppentrenner(),
+            suchKnopf, widerrufKnopf, vorschauKnopf, Gruppentrenner(),
+            leeren, neu,
+        ])
 
-        for knopf in [
-            verwerfen, gruppe, zurueckKnopf, vorKnopf, suchKnopf,
-            widerrufKnopf, vorschauKnopf, leeren, neu,
+        kopierenKnopf = Knoepfe.knopf(
+            "Geschützten Text kopieren", symbol: "lock.fill",
+            ziel: self, aktion: #selector(kopierenGeklickt),
+            hilfe: "⌘⏎ — in die Zwischenablage, dann im KI-Tool einfügen. "
+                + "⇧⌘⏎ merkt dabei alle offenen Vermutungen."
+        )
+        kopierenKnopf.keyEquivalent = "\r"
+        kopierenKnopf.keyEquivalentModifierMask = [.command]
+        // Der eine Knopf, um den es am Ende geht, in der Akzentfarbe. Ab
+        // macOS 26 heißt das „primäre Tönung", davor ist es die Bezelfarbe.
+        if #available(macOS 26.0, *) {
+            kopierenKnopf.tintProminence = .primary
+        } else {
+            kopierenKnopf.bezelColor = .controlAccentColor
+        }
+        kopierenKnopf.setContentHuggingPriority(.required, for: .horizontal)
+        kopierenKnopf.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        let textZeile = NSStackView(views: [werkzeugLeiste, kopierenKnopf])
+        textZeile.orientation = .horizontal
+        textZeile.spacing = 16
+        textZeile.alignment = .firstBaseline
+        textZeile.translatesAutoresizingMaskIntoConstraints = false
+        werkzeugLeiste.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        fusszeile.font = .systemFont(ofSize: 12)
+        fusszeile.textColor = .tertiaryLabelColor
+        fusszeile.preferredMaxLayoutWidth = 900
+        fusszeile.stringValue = "⌘⏎ kopiert · ⇧⌘⏎ kopiert und merkt alle offenen Vermutungen · "
+            + "⇥ wechselt zwischen Text und Liste · ⎋ bricht ab"
+
+        // Drei Reihen mit Etikett links. Die Etiketten sind gleich breit,
+        // damit die Reihen an einer Kante beginnen.
+        let etikettBreite: CGFloat = 84
+        var reihen: [NSStackView] = []
+        for (name, inhalt) in [
+            ("Schützen als", kategorienLeiste as NSView),
+            ("Fundstelle", fundstelleZeile),
+            ("", meldung),
+            ("Text", textZeile),
         ] {
-            knopf.bezelStyle = .rounded
-            knopf.controlSize = .small
-            knopfreiheUnten.addArrangedSubview(knopf)
+            let etikett = Knoepfe.etikett(name)
+            let reihe = NSStackView(views: [etikett, inhalt])
+            reihe.orientation = .horizontal
+            reihe.spacing = 12
+            reihe.alignment = .firstBaseline
+            reihe.translatesAutoresizingMaskIntoConstraints = false
+            etikett.widthAnchor.constraint(equalToConstant: etikettBreite).isActive = true
+            inhalt.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            reihen.append(reihe)
         }
-        // Nur diese vier hängen an einer ausgewählten Stelle. Kopieren,
-        // Suchen, Leeren und Neuer Text gingen vorher auch nicht, solange
-        // nichts ausgewählt war — das war keine Absicht.
-        stellenKnoepfe.append(contentsOf: [verwerfen, gruppe, zurueckKnopf, vorKnopf])
+
+        let fuss = NSStackView(views: [trennlinie] + reihen + [fusszeile])
+        fuss.orientation = .vertical
+        fuss.spacing = 10
+        fuss.alignment = .leading
+        fuss.setCustomSpacing(14, after: trennlinie)
+        // Die Meldung rückt an die Felder heran, zu denen sie gehört.
+        fuss.setCustomSpacing(4, after: reihen[1])
+        fuss.setCustomSpacing(14, after: reihen[3])
+        fuss.translatesAutoresizingMaskIntoConstraints = false
+
+        NSLayoutConstraint.activate(
+            [trennlinie.widthAnchor.constraint(equalTo: fuss.widthAnchor),
+             fusszeile.widthAnchor.constraint(equalTo: fuss.widthAnchor)]
+            + reihen.map { $0.widthAnchor.constraint(equalTo: fuss.widthAnchor) }
+        )
+        return fuss
+    }
+
+    /// Die Kategorien, die im Fenster zur Wahl stehen — mit den zugeschalteten
+    /// Erkennungen aus dem Wörterbuch.
+    private var kategorienZurWahl: [Kategorie] {
+        Kategorie.zurWahl(mit: analyse.woerterbuch)
+    }
+
+    /// „1–5", „1–7" oder „1–9 und 0": die Tasten, die gerade Kategorien tragen.
+    private var tastenhinweis: String {
+        let anzahl = kategorienZurWahl.count
+        if anzahl >= 10 { return "1–9 und 0" }
+        return "1–\(anzahl)"
+    }
+
+    private func kategorie(fuerTaste zeichen: String) -> Kategorie? {
+        guard let platz = Kategorie.platz(fuerTaste: zeichen) else { return nil }
+        let reihe = kategorienZurWahl
+        return reihe.indices.contains(platz) ? reihe[platz] : nil
+    }
+
+    /// Die Knöpfe für „Schützen als": die fünf festen Kategorien, dahinter
+    /// die zugeschalteten Erkennungen. Wird neu gebaut, sobald sich die Reihe
+    /// ändert — etwa weil in den Einstellungen „Anschrift" dazukam.
+    private func baueKategorieKnoepfe() {
+        let reihe = kategorienZurWahl
+        guard reihe != gebauteKategorien || kategorieKnoepfe.isEmpty else { return }
+        gebauteKategorien = reihe
+
+        kategorieKnoepfe = reihe.enumerated().map { platz, kategorie in
+            let taste = Kategorie.taste(fuerPlatz: platz)
+            let knopf = Knoepfe.knopf(
+                kategorie.anzeigename,
+                symbol: Knoepfe.tastenkappe(taste),
+                ziel: self,
+                aktion: #selector(kategorieGeklickt(_:)),
+                hilfe: taste.map { "Text markieren, dann \($0) drücken — oder ⌘\($0) ohne Markierung" }
+                    ?? "Als \(kategorie.anzeigename) schützen"
+            )
+            knopf.tag = platz
+            return knopf
+        }
+        kategorienLeiste.setze(kategorieKnoepfe + [Gruppentrenner(), verwerfenKnopf, gruppeKnopf])
     }
 
     // MARK: Darstellung
@@ -353,7 +487,8 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
             ausgewaehlt: gewaehlt,
             leertext: analyse.original.isEmpty
                 ? "Kein Text zum Prüfen."
-                : "Nichts erkannt.\n\nMarkiere links im Text, was geschützt werden soll, und drücke 1–5."
+                : "Nichts erkannt.\n\nMarkiere links im Text, was geschützt werden soll, "
+                    + "und drücke \(tastenhinweis)."
         )
 
         if let gewaehlt, let bereich = bereiche[gewaehlt] {
@@ -361,6 +496,7 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
         }
         // Der Text ist neu aufgebaut, die alten Trefferbereiche zeigen ins Leere.
         suche.aktualisiere()
+        baueKategorieKnoepfe()
         aktualisiereWerkzeuge()
         klappeNachziehen()
         beiAenderung?(analyse)
@@ -380,7 +516,7 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
         guard gesamt > 0 else {
             kopfzeile.stringValue = "Nichts gefunden"
             regelzeile.stringValue = "Der Text ginge unverändert raus. Markiere im Text, was geschützt "
-                + "werden soll, und drücke 1–5. Mit ⏎ kopierst du ihn so, wie er ist."
+                + "werden soll, und drücke \(tastenhinweis). Mit ⌘⏎ kopierst du ihn so, wie er ist."
             return
         }
 
@@ -427,18 +563,16 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
     private func aktualisiereWerkzeuge() {
         let fund = aktuellerFund
         for knopf in stellenKnoepfe {
-            if knopf.title.hasPrefix("Gehört zu") {
-                // Geht auch ohne Vorschlag: du weißt oft besser als die
-                // Heuristik, wer gemeint ist.
-                knopf.isEnabled = (fund != nil || hatFreieMarkierung)
-                    && !analyse.woerterbuch.eintraege.isEmpty
-                if let vorschlag = fund?.gruppenVorschlag,
-                   let eintrag = analyse.woerterbuch.eintrag(mitId: vorschlag) {
-                    knopf.toolTip = "Vorschlag: \(eintrag.text) (\(eintrag.platzhalter))"
-                }
-            } else {
-                knopf.isEnabled = fund != nil || hatFreieMarkierung
-            }
+            knopf.isEnabled = fund != nil || hatFreieMarkierung
+        }
+        // Zuordnen geht auch ohne Vorschlag: du weißt oft besser als die
+        // Heuristik, wer gemeint ist. Aber nur, wenn das Wörterbuch schon
+        // jemanden kennt.
+        gruppeKnopf.isEnabled = (fund != nil || hatFreieMarkierung)
+            && !analyse.woerterbuch.eintraege.isEmpty
+        if let vorschlag = fund?.gruppenVorschlag,
+           let eintrag = analyse.woerterbuch.eintrag(mitId: vorschlag) {
+            gruppeKnopf.toolTip = "Vorschlag: \(eintrag.text) (\(eintrag.platzhalter))"
         }
 
         decknameFeld.isEnabled = fund != nil && !(fund?.verworfen ?? true)
@@ -478,7 +612,6 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
     private func zeigeMeldung(_ text: String?) {
         meldung.textColor = .systemRed
         meldung.stringValue = text ?? ""
-        meldung.isHidden = text == nil
     }
 
     // MARK: Tastatur
@@ -511,10 +644,9 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
             case "g":
                 if zusatz.contains(.shift) { suche.vorheriger() } else { suche.naechster() }
                 return true
-            case "1", "2", "3", "4", "5":
-                if let ziffer = Int(ereignis.charactersIgnoringModifiers ?? ""),
-                   Kategorie.schnellwahl.indices.contains(ziffer - 1) {
-                    setzeKategorie(Kategorie.schnellwahl[ziffer - 1])
+            case "0", "1", "2", "3", "4", "5", "6", "7", "8", "9":
+                if let kategorie = kategorie(fuerTaste: ereignis.charactersIgnoringModifiers ?? "") {
+                    setzeKategorie(kategorie)
                     return true
                 }
                 return false
@@ -571,8 +703,8 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
               let zeichen = ereignis.charactersIgnoringModifiers?.lowercased()
         else { return false }
 
-        if let ziffer = Int(zeichen), Kategorie.schnellwahl.indices.contains(ziffer - 1) {
-            setzeKategorie(Kategorie.schnellwahl[ziffer - 1])
+        if let kategorie = kategorie(fuerTaste: zeichen) {
+            setzeKategorie(kategorie)
             return true
         }
         if zeichen == "d" {
@@ -620,8 +752,9 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
     // MARK: Aktionen
 
     @objc private func kategorieGeklickt(_ absender: NSButton) {
-        guard Kategorie.schnellwahl.indices.contains(absender.tag) else { return }
-        setzeKategorie(Kategorie.schnellwahl[absender.tag])
+        let reihe = kategorienZurWahl
+        guard reihe.indices.contains(absender.tag) else { return }
+        setzeKategorie(reihe[absender.tag])
     }
 
     @objc private func kopierenGeklickt() { uebernehmen(merken: false) }
@@ -631,8 +764,8 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
     @objc private func merkenGeaendert() {
         if hatFreieMarkierung {
             kopfzeile.stringValue = merkenHaken.state == .on
-                ? "Markierung: Taste 1–5 legt sie als neuen Eintrag an"
-                : "Markierung: Taste 1–5 schützt sie nur in diesem Text"
+                ? "Markierung: Taste \(tastenhinweis) legt sie als neuen Eintrag an"
+                : "Markierung: Taste \(tastenhinweis) schützt sie nur in diesem Text"
         } else {
             beschrifteKopf()
         }
@@ -849,6 +982,7 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
 
         let feld = MarkierungsPopover(
             begriff: text,
+            kategorien: kategorienZurWahl,
             kannZuordnen: !analyse.woerterbuch.eintraege.isEmpty
         ) { [weak self] entscheidung in
             guard let self else { return }
@@ -904,8 +1038,9 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
     /// und greifen deshalb auch dann, wenn der Fokus woanders im Fenster
     /// steht. Jeder Knopf im Fenster ruft dieselbe Methode.
     @objc func aktionKategorie(_ absender: NSMenuItem) {
-        guard Kategorie.schnellwahl.indices.contains(absender.tag) else { return }
-        setzeKategorie(Kategorie.schnellwahl[absender.tag])
+        let reihe = kategorienZurWahl
+        guard reihe.indices.contains(absender.tag) else { return }
+        setzeKategorie(reihe[absender.tag])
     }
 
     @objc func aktionKopieren(_ absender: Any?) { uebernehmen(merken: false) }
@@ -1053,7 +1188,8 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
     @objc private func vorschauUmschalten() {
         let marke = originalMarke()
         ohneChips.toggle()
-        vorschauKnopf.title = ohneChips ? "Mit Decknamen (⌘E)" : "Nur Text (⌘E)"
+        vorschauKnopf.title = ohneChips ? "Mit Decknamen" : "Nur Text"
+        Knoepfe.setze(symbol: ohneChips ? "eye" : "eye.slash", auf: vorschauKnopf)
         aktualisiere(originalMarke: marke)
         window?.makeFirstResponder(textAnsicht)
     }
@@ -1349,8 +1485,8 @@ extension SchutzAnsicht: NSTextViewDelegate {
         if hatFreieMarkierung {
             zeigeMeldung(nil)
             kopfzeile.stringValue = merkenHaken.state == .on
-                ? "Markierung: Taste 1–5 legt sie als neuen Eintrag an"
-                : "Markierung: Taste 1–5 schützt sie nur in diesem Text"
+                ? "Markierung: Taste \(tastenhinweis) legt sie als neuen Eintrag an"
+                : "Markierung: Taste \(tastenhinweis) schützt sie nur in diesem Text"
             zeigeMarkierungsfeld()
         } else {
             beschrifteKopf()
