@@ -1,9 +1,10 @@
 import AppKit
 import TextschleuseCore
 
-/// Die Pflege der Freiliste: Wörter, die nie als Vermutung durchgehen.
+/// Zwei Listen in einem Reiter: was nie ersetzt werden soll, und welche
+/// Erkennungen zusätzlich laufen.
 ///
-/// Eingebaute Einträge stehen grau da und lassen sich nicht entfernen. Was du
+/// Eingebaute Freiwörter stehen grau da und lassen sich nicht entfernen. Was du
 /// selbst aufnimmst, kannst du auch wieder herunternehmen.
 final class FreilisteAnsicht: NSView {
 
@@ -15,6 +16,7 @@ final class FreilisteAnsicht: NSView {
     private let eingabe = NSTextField()
     private let meldung = NSTextField(labelWithString: "")
     private var zeilen: [(wort: String, eingebaut: Bool)] = []
+    private var typenHaken: [NSButton] = []
 
     init(woerterbuch: Woerterbuch) {
         self.woerterbuch = woerterbuch
@@ -83,7 +85,40 @@ final class FreilisteAnsicht: NSView {
         zeile.spacing = 8
         zeile.translatesAutoresizingMaskIntoConstraints = false
 
-        let stapel = NSStackView(views: [erklaerung, rollflaeche, zeile, meldung])
+        // Die zuschaltbaren Erkennungen darunter. Sie gehören hierher, weil
+        // beide Listen dieselbe Frage beantworten: wonach wird gesucht.
+        let typenTitel = NSTextField(labelWithString: "Zusätzlich suchen nach")
+        typenTitel.font = .systemFont(ofSize: 13, weight: .semibold)
+
+        let typenErklaerung = NSTextField(wrappingLabelWithString:
+            "Diese Erkennungen sind ab Werk aus. Anders als IBAN oder E-Mail haben sie "
+            + "keine Prüfsumme — sie erkennen ein Muster und können danebenliegen. "
+            + "Was sie finden, bekommt einen eigenen Decknamen wie WEBSITE_1.")
+        typenErklaerung.font = .systemFont(ofSize: 11)
+        typenErklaerung.textColor = .secondaryLabelColor
+        typenErklaerung.preferredMaxLayoutWidth = 470
+
+        var haken: [NSButton] = []
+        for regel in Zusatzregel.alle {
+            let kasten = NSButton(
+                checkboxWithTitle: "\(regel.name) — \(regel.erklaerung)",
+                target: self,
+                action: #selector(typGewaehlt(_:))
+            )
+            kasten.identifier = NSUserInterfaceItemIdentifier(regel.kennung)
+            kasten.state = woerterbuch.istAn(regel) ? .on : .off
+            kasten.lineBreakMode = .byWordWrapping
+            haken.append(kasten)
+        }
+        typenHaken = haken
+
+        let typen = NSStackView(views: [typenTitel, typenErklaerung] + haken)
+        typen.orientation = .vertical
+        typen.spacing = 6
+        typen.alignment = .leading
+        typen.translatesAutoresizingMaskIntoConstraints = false
+
+        let stapel = NSStackView(views: [erklaerung, rollflaeche, zeile, trennlinie(), typen, meldung])
         stapel.orientation = .vertical
         stapel.spacing = 10
         stapel.alignment = .leading
@@ -92,7 +127,7 @@ final class FreilisteAnsicht: NSView {
         addSubview(stapel)
 
         rollflaeche.setContentHuggingPriority(.defaultLow, for: .vertical)
-        for fest in [erklaerung, zeile, meldung] {
+        for fest in [erklaerung, zeile, meldung, typen] {
             fest.setContentHuggingPriority(.required, for: .vertical)
         }
 
@@ -105,6 +140,7 @@ final class FreilisteAnsicht: NSView {
             rollflaeche.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -40),
             zeile.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -40),
             meldung.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -40),
+            typen.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -40),
             // Ohne festes Maß fällt die Rollfläche im Stapel auf null zusammen.
             rollflaeche.heightAnchor.constraint(greaterThanOrEqualToConstant: 150),
         ])
@@ -137,6 +173,34 @@ final class FreilisteAnsicht: NSView {
         woerterbuch.nimmVonFreiliste(zeile.wort)
         melde("„\(zeile.wort)\" wird wieder vorgeschlagen.")
         sichere()
+    }
+
+    private func trennlinie() -> NSBox {
+        let linie = NSBox()
+        linie.boxType = .separator
+        return linie
+    }
+
+    @objc private func typGewaehlt(_ absender: NSButton) {
+        guard let kennung = absender.identifier?.rawValue,
+              let regel = Zusatzregel.mit(kennung: kennung)
+        else { return }
+        woerterbuch.schalte(regel, an: absender.state == .on)
+        melde(absender.state == .on
+            ? "Ab jetzt wird auch nach \(regel.name) gesucht."
+            : "\(regel.name) wird nicht mehr gesucht. Bereits gemerkte Einträge bleiben.")
+        beimSichern?(woerterbuch)
+    }
+
+    /// Für den Selbsttest.
+    func schalteTypFuerPruefung(_ regel: Zusatzregel, an: Bool) {
+        guard let haken = typenHaken.first(where: { $0.identifier?.rawValue == regel.kennung }) else { return }
+        haken.state = an ? .on : .off
+        typGewaehlt(haken)
+    }
+
+    func typenHakenFuerPruefung() -> [(kennung: String, an: Bool)] {
+        typenHaken.map { (kennung: $0.identifier?.rawValue ?? "", an: $0.state == .on) }
     }
 
     /// Für den Selbsttest: nimmt ein Wort auf, ohne den Umweg über das Feld.

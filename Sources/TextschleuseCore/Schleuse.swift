@@ -45,7 +45,7 @@ public enum Schleuse {
         let nsText = text as NSString
 
         var funde = findeAusWoerterbuch(in: nsText, woerterbuch: arbeitsbuch)
-        funde += Regelwerk.finde(in: text)
+        funde += Regelwerk.finde(in: text, zusaetzlich: arbeitsbuch.zusatzregeln)
         // Die Freiliste bremst nur Vermutungen. Sie greift vor der
         // Überschneidungsprüfung, damit ein weggefallenes „August" Platz für
         // den längeren Datumstreffer macht statt ihn zu verdrängen.

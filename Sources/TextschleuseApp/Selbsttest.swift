@@ -1559,6 +1559,41 @@ enum Selbsttest {
             fehler += 1
         }
 
+        // Die zuschaltbaren Erkennungen im selben Reiter.
+        let haken = ansicht.typenHakenFuerPruefung()
+        if haken.count == Zusatzregel.alle.count, haken.allSatisfy({ !$0.an }) {
+            print("✓ Typen: \(haken.count) Erkennungen, alle aus")
+        } else {
+            print("✗ Typen: \(haken.count) Haken, davon \(haken.filter(\.an).count) an")
+            fehler += 1
+        }
+
+        ansicht.schalteTypFuerPruefung(.website, an: true)
+        if gemeldet?.istAn(.website) == true {
+            print("✓ Typen: Website angeschaltet und gemeldet")
+        } else {
+            print("✗ Typen: Website kam nicht oben an")
+            fehler += 1
+        }
+
+        if let mitWebsite = gemeldet {
+            let gefunden = Schleuse.analysiere("Mehr auf www.risiq.de", woerterbuch: mitWebsite)
+            if gefunden.aktiveFunde.contains(where: { $0.kategorie == .website }) {
+                print("✓ Typen: die Adresse wird sofort gefunden")
+            } else {
+                print("✗ Typen: die Adresse wird nicht gefunden")
+                fehler += 1
+            }
+        }
+
+        ansicht.schalteTypFuerPruefung(.website, an: false)
+        if gemeldet?.istAn(.website) == false {
+            print("✓ Typen: und wieder aus")
+        } else {
+            print("✗ Typen: bleibt an")
+            fehler += 1
+        }
+
         // Und die Wirkung auf einen echten Text.
         var buch = Woerterbuch()
         buch.gibFrei("Nordlicht")
