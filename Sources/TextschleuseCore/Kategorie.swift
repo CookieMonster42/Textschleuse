@@ -18,6 +18,14 @@ public enum Kategorie: String, Codable, CaseIterable, Sendable {
     case steuerId
     case nummer
     case begriff
+    // Zuschaltbare Typen. Sie stehen immer im Enum, damit ein alter Text auch
+    // dann zurückzudrehen ist, wenn die Erkennung inzwischen aus ist. Ob nach
+    // ihnen gesucht wird, steuert `Woerterbuch.aktiveZusatzregeln`.
+    case website
+    case anschrift
+    case aktenzeichen
+    case kundennummer
+    case vertragsnummer
     case unbekannt
 
     public var praefix: String {
@@ -34,6 +42,11 @@ public enum Kategorie: String, Codable, CaseIterable, Sendable {
         case .steuerId: return "STEUERID"
         case .nummer: return "NUMMER"
         case .begriff: return "BEGRIFF"
+        case .website: return "WEBSITE"
+        case .anschrift: return "ANSCHRIFT"
+        case .aktenzeichen: return "AKTENZEICHEN"
+        case .kundennummer: return "KUNDENNUMMER"
+        case .vertragsnummer: return "VERTRAGSNUMMER"
         case .unbekannt: return "UNBEKANNT"
         }
     }
@@ -53,6 +66,11 @@ public enum Kategorie: String, Codable, CaseIterable, Sendable {
         case .steuerId: return "Steuer-ID"
         case .nummer: return "Nummer"
         case .begriff: return "Sonstiges"
+        case .website: return "Website"
+        case .anschrift: return "Anschrift"
+        case .aktenzeichen: return "Aktenzeichen"
+        case .kundennummer: return "Kundennummer"
+        case .vertragsnummer: return "Vertragsnummer"
         case .unbekannt: return "Unbekannt"
         }
     }
@@ -64,8 +82,11 @@ public enum Kategorie: String, Codable, CaseIterable, Sendable {
     /// Sie landen im Wörterbuch in der Sektion „automatisch erkannt".
     public var istRegelkategorie: Bool {
         switch self {
-        case .email, .telefon, .iban, .bic, .karte, .datum, .steuerId: return true
-        default: return false
+        case .email, .telefon, .iban, .bic, .karte, .datum, .steuerId,
+             .website, .anschrift, .aktenzeichen, .kundennummer, .vertragsnummer:
+            return true
+        default:
+            return false
         }
     }
 }

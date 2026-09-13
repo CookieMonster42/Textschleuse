@@ -1322,6 +1322,125 @@ Pruefstand.pruefe("Eintragsliste: Suche ohne Rücksicht auf Umlaute und Fälle")
     Pruefstand.gleich(leer.count, 0, "kein Treffer, keine leeren Blöcke")
 }
 
+// MARK: Zuschaltbare Erkennungen
+
+/// Analysiert mit genau einer zugeschalteten Erkennung.
+func mitRegel(_ regel: Zusatzregel, _ text: String) -> Analyse {
+    var buch = Woerterbuch()
+    buch.schalte(regel, an: true)
+    return Schleuse.analysiere(text, woerterbuch: buch)
+}
+
+Pruefstand.pruefe("Zusatzregeln: sind ab Werk aus") {
+    let analyse = Schleuse.analysiere("Mehr auf www.beispielbank-nord.de", woerterbuch: Woerterbuch())
+    Pruefstand.gleich(analyse.aktiveFunde.count, 0, "ohne Zuschalten passiert nichts")
+}
+
+Pruefstand.pruefe("Zusatzregeln: Website") {
+    let treffer = mitRegel(.website, "Mehr auf https://beispielbank-nord.de/kredite und www.risiq.de.")
+        .aktiveFunde.filter { $0.kategorie == .website }
+    Pruefstand.gleich(treffer.count, 2, "beide Adressen")
+    Pruefstand.gleich(treffer.first?.text, "https://beispielbank-nord.de/kredite", "mit Pfad")
+    Pruefstand.gleich(treffer.last?.text, "www.risiq.de", "der Satzpunkt gehört nicht dazu")
+
+    // Eine nackte Domain ist zu riskant: „z.B." und „Datei.pdf" sähen genauso aus.
+    let nackt = mitRegel(.website, "Siehe beispielbank-nord.de oder Anlage.pdf")
+        .aktiveFunde.filter { $0.kategorie == .website }
+    Pruefstand.gleich(nackt.count, 0, "ohne http oder www keine Website")
+}
+
+Pruefstand.pruefe("Zusatzregeln: Website frisst keine E-Mail-Adresse") {
+    let analyse = mitRegel(.website, "Schreib an almut@beispielbank-nord.de, mehr auf www.beispielbank-nord.de")
+    Pruefstand.gleich(
+        analyse.aktiveFunde.filter { $0.kategorie == .email }.count,
+        1,
+        "die Adresse bleibt eine E-Mail"
+    )
+    Pruefstand.gleich(
+        analyse.aktiveFunde.filter { $0.kategorie == .website }.count,
+        1,
+        "und die Website bleibt eine Website"
+    )
+}
+
+Pruefstand.pruefe("Zusatzregeln: Anschrift") {
+    let treffer = mitRegel(.anschrift, "Wohnhaft Wiesenweg 14b, 68159 Mannheim.")
+        .aktiveFunde.filter { $0.kategorie == .anschrift }
+    Pruefstand.gleich(treffer.count, 1, "eine Anschrift")
+    Pruefstand.gleich(treffer.first?.text, "Wiesenweg 14b", "Straße samt Hausnummer")
+
+    let mitSzet = mitRegel(.anschrift, "Am Hauptbahnhof: Bahnhofstraße 3 steht leer.")
+        .aktiveFunde.filter { $0.kategorie == .anschrift }
+    Pruefstand.gleich(mitSzet.first?.text, "Bahnhofstraße 3", "-straße mit ß")
+
+    let ohneNummer = mitRegel(.anschrift, "Die Bahnhofstraße ist gesperrt.")
+        .aktiveFunde.filter { $0.kategorie == .anschrift }
+    Pruefstand.gleich(ohneNummer.count, 0, "ohne Hausnummer ist es keine Anschrift")
+}
+
+Pruefstand.pruefe("Zusatzregeln: Aktenzeichen") {
+    let gericht = mitRegel(.aktenzeichen, "Verfahren 12 O 345/21 beim Landgericht.")
+        .aktiveFunde.filter { $0.kategorie == .aktenzeichen }
+    Pruefstand.gleich(gericht.first?.text, "12 O 345/21", "Gerichtsform")
+
+    let mitLabel = mitRegel(.aktenzeichen, "Az.: RQ-2024-0815 liegt vor.")
+        .aktiveFunde.filter { $0.kategorie == .aktenzeichen }
+    Pruefstand.gleich(mitLabel.first?.text, "RQ-2024-0815", "hinter „Az.\" nur der Wert")
+}
+
+Pruefstand.pruefe("Zusatzregeln: Kunden- und Vertragsnummer behalten ihr Etikett") {
+    let kunde = mitRegel(.kundennummer, "Bitte Kundennummer 4711-22 angeben.")
+        .aktiveFunde.filter { $0.kategorie == .kundennummer }
+    Pruefstand.gleich(kunde.first?.text, "4711-22", "nur der Wert wird ersetzt")
+
+    let kurz = mitRegel(.kundennummer, "Kd.-Nr. A9931 im Betreff.")
+        .aktiveFunde.filter { $0.kategorie == .kundennummer }
+    Pruefstand.gleich(kurz.first?.text, "A9931", "auch in der Kurzform")
+
+    let vertrag = mitRegel(.vertragsnummer, "Ihre Vertragsnummer: V-2019/44 läuft aus.")
+        .aktiveFunde.filter { $0.kategorie == .vertragsnummer }
+    Pruefstand.gleich(vertrag.first?.text, "V-2019/44", "Vertragsnummer ohne das Wort davor")
+
+    // Das Wort davor muss stehen bleiben, sonst versteht die KI die Frage nicht.
+    var buch = Woerterbuch()
+    buch.schalte(.kundennummer, an: true)
+    let analyse = Schleuse.analysiere("Bitte Kundennummer 4711-22 angeben.", woerterbuch: buch)
+    Pruefstand.enthaelt(Schleuse.geschuetzterText(analyse), "Kundennummer", "das Etikett bleibt")
+    Pruefstand.enthaeltNicht(Schleuse.geschuetzterText(analyse), "4711-22", "der Wert ist weg")
+}
+
+Pruefstand.pruefe("Zusatzregeln: Decknamen drehen sich zurück") {
+    var buch = Woerterbuch()
+    buch.schalte(.website, an: true)
+    let analyse = Schleuse.analysiere("Mehr auf www.risiq.de", woerterbuch: buch)
+    let geschuetzt = Schleuse.geschuetzterText(analyse)
+    Pruefstand.enthaelt(geschuetzt, "WEBSITE_1", "bekommt einen eigenen Decknamen")
+
+    let zurueck = Rueckweg.analysiere(geschuetzt, woerterbuch: analyse.woerterbuch)
+    Pruefstand.gleich(zurueck.ergebnis, "Mehr auf www.risiq.de", "und wieder zurück")
+}
+
+Pruefstand.pruefe("Zusatzregeln: Ein- und Ausschalten übersteht das Speichern") {
+    let ordner = FileManager.default.temporaryDirectory
+        .appendingPathComponent("textschleuse-pruefung-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: ordner) }
+    let speicher = Speicher(ordner: ordner, schluesselquelle: FesterSchluessel())
+
+    var buch = Woerterbuch()
+    buch.schalte(.website, an: true)
+    buch.schalte(.anschrift, an: true)
+    buch.schalte(.anschrift, an: false)
+    do {
+        try speicher.sichern(buch)
+        let geladen = try speicher.laden()
+        Pruefstand.wahr(geladen.istAn(.website), "Website ist an")
+        Pruefstand.falsch(geladen.istAn(.anschrift), "Anschrift ist aus")
+        Pruefstand.gleich(geladen.zusatzregeln.count, 1, "genau eine läuft")
+    } catch {
+        Pruefstand.wahr(false, "sichern und laden ohne Fehler (\(error))")
+    }
+}
+
 // MARK: Freiliste
 
 Pruefstand.pruefe("Freiliste: Monate und Wochentage sind eingebaut") {

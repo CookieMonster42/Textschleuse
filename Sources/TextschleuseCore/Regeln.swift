@@ -311,8 +311,12 @@ public enum Regelwerk {
     /// Die Regeln greifen ineinander: die Ziffernblöcke einer IBAN sehen für
     /// sich genommen aus wie Telefonnummern. Deshalb fällt hier schon die
     /// Entscheidung, welcher Treffer gewinnt — der längere.
-    public static func finde(in text: String) -> [Fund] {
+    ///
+    /// `zusaetzlich` sind die in den Einstellungen angeschalteten Erkennungen.
+    /// Sie laufen im selben Durchgang, damit eine Website nicht mit der
+    /// E-Mail-Adresse darin kollidiert.
+    public static func finde(in text: String, zusaetzlich: [Zusatzregel] = []) -> [Fund] {
         let nsText = text as NSString
-        return alle.flatMap { $0.finde(in: nsText) }.ohneUeberschneidungen()
+        return (alle + zusaetzlich).flatMap { $0.finde(in: nsText) }.ohneUeberschneidungen()
     }
 }

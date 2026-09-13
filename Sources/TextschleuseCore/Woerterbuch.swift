@@ -137,17 +137,21 @@ public struct Woerterbuch: Codable, Sendable {
     public var naechsteNummern: [String: Int]
     /// Wörter, die nie als Vermutung durchgehen. Siehe `Freiliste`.
     public var eigeneFreieWoerter: [String]
+    /// Kennungen der zugeschalteten Erkennungen, siehe `Zusatzregel`.
+    public var aktiveZusatzregeln: [String]
 
     public init(
         version: Int = Woerterbuch.aktuelleVersion,
         eintraege: [Eintrag] = [],
         naechsteNummern: [String: Int] = [:],
-        eigeneFreieWoerter: [String] = []
+        eigeneFreieWoerter: [String] = [],
+        aktiveZusatzregeln: [String] = []
     ) {
         self.version = version
         self.eintraege = eintraege
         self.naechsteNummern = naechsteNummern
         self.eigeneFreieWoerter = eigeneFreieWoerter
+        self.aktiveZusatzregeln = aktiveZusatzregeln
     }
 
     /// Von Hand geschrieben: `eigeneFreieWoerter` fehlt in älteren Dateien,
@@ -164,6 +168,30 @@ public struct Woerterbuch: Codable, Sendable {
             [String].self,
             forKey: .eigeneFreieWoerter
         ) ?? []
+        aktiveZusatzregeln = try behaelter.decodeIfPresent(
+            [String].self,
+            forKey: .aktiveZusatzregeln
+        ) ?? []
+    }
+
+    // MARK: Zugeschaltete Erkennungen
+
+    /// Die angeschalteten Erkennungen, in der Reihenfolge der Einstellungen.
+    public var zusatzregeln: [Zusatzregel] {
+        Zusatzregel.alle.filter { aktiveZusatzregeln.contains($0.kennung) }
+    }
+
+    public func istAn(_ regel: Zusatzregel) -> Bool {
+        aktiveZusatzregeln.contains(regel.kennung)
+    }
+
+    public mutating func schalte(_ regel: Zusatzregel, an: Bool) {
+        if an {
+            guard !istAn(regel) else { return }
+            aktiveZusatzregeln.append(regel.kennung)
+        } else {
+            aktiveZusatzregeln.removeAll { $0 == regel.kennung }
+        }
     }
 
     // MARK: Freiliste
