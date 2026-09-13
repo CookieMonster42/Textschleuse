@@ -35,6 +35,14 @@ Zwischenablage.
 
 Die Antwort des KI-Tools kopieren, `⌃⌥⌘R` drücken, einfügen.
 
+Wer lieber im Fenster arbeitet: ein Textfeld, oben der Umschalter zwischen
+Schützen und Zurückdrehen. Der Text bleibt beim Umschalten stehen und wird in
+der anderen Richtung geprüft; jede Richtung hat ihren eigenen Verlauf. Der
+Text lässt sich bearbeiten wie überall — tippen, alles markieren, löschen.
+
+Alle Tasten stehen auf einem Blatt, das beim Start erscheint und jederzeit
+über den Knopf „Tastenkürzel" oder `⌘/` zu haben ist.
+
 ## Selbst bauen
 
 Es braucht nur die Command Line Tools, kein Xcode.

@@ -13,9 +13,16 @@ final class RueckwegAnsicht: NSView, NSUserInterfaceValidations {
     /// und in die Datei, sonst ist sie beim nächsten Text wieder weg.
     var beiWoerterbuchAenderung: ((Woerterbuch) -> Void)?
 
+    /// Läuft nach jeder Änderung am Text, damit der Verlauf mitschreibt.
+    var beiAenderung: ((RueckwegErgebnis) -> Void)?
+
     private(set) var ergebnis: RueckwegErgebnis
     private var woerterbuch: Woerterbuch
-    private let unbekannte: [String: String]
+    private var unbekannte: [String: String]
+    /// Sammelt Tastenanschläge, damit nicht bei jedem Buchstaben neu
+    /// gesucht wird.
+    private var nachdenkpause: Timer?
+    private var tastenKnopf = NSButton()
 
     private var auswahl = 0
     private var bereiche: [UUID: NSRange] = [:]
@@ -72,6 +79,31 @@ final class RueckwegAnsicht: NSView, NSUserInterfaceValidations {
         ergebnis = neues
         auswahl = 0
         meldung.isHidden = true
+        textAnsicht.setSelectedRange(NSRange(location: 0, length: 0))
+        aktualisiere()
+        textAnsicht.scroll(NSPoint(x: 0, y: 0))
+    }
+
+    /// Ein neuer Text mit dem aktuellen Stand von Wörterbuch und
+    /// Sitzungsplatzhaltern.
+    func setze(
+        ergebnis neues: RueckwegErgebnis,
+        woerterbuch buch: Woerterbuch,
+        unbekannte neue: [String: String]
+    ) {
+        woerterbuch = buch
+        unbekannte = neue
+        setze(ergebnis: neues)
+    }
+
+    /// Nimmt ein von außen geändertes Wörterbuch an und löst den Text damit
+    /// neu auf — ohne Meldung, das war keine Entscheidung hier im Fenster.
+    func setze(woerterbuch buch: Woerterbuch) {
+        guard buch.eintraege.count != woerterbuch.eintraege.count
+            || buch.alleDecknamen != woerterbuch.alleDecknamen
+        else { return }
+        woerterbuch = buch
+        ergebnis = Rueckweg.analysiere(ergebnis.original, woerterbuch: woerterbuch, unbekannte: unbekannte)
         aktualisiere()
     }
 
@@ -86,6 +118,25 @@ final class RueckwegAnsicht: NSView, NSUserInterfaceValidations {
         textAnsicht.tastenweiche = { [weak self] ereignis in
             self?.verarbeite(ereignis) ?? false
         }
+        // Bearbeitbar wie beim Schützen: was dasteht, ist der Text mit den
+        // Platzhaltern, die eingesetzten Namen sind nur Anzeige daneben.
+        textAnsicht.delegate = self
+        textAnsicht.isEditable = true
+        textAnsicht.isRichText = false
+        textAnsicht.allowsUndo = false
+        textAnsicht.font = .systemFont(ofSize: 13)
+
+        tastenKnopf = Knoepfe.knopf(
+            "Tastenkürzel", symbol: "keyboard",
+            ziel: self, aktion: #selector(zeigeTastenkuerzel),
+            hilfe: "Alle Tasten auf einen Blick (⌘/)"
+        )
+        tastenKnopf.controlSize = .small
+        tastenKnopf.font = .systemFont(ofSize: 11)
+        let kopfzeileMitHilfe = NSStackView(views: [kopfzeile, NSView(), tastenKnopf])
+        kopfzeileMitHilfe.orientation = .horizontal
+        kopfzeileMitHilfe.spacing = 8
+        kopfzeileMitHilfe.translatesAutoresizingMaskIntoConstraints = false
 
         liste.translatesAutoresizingMaskIntoConstraints = false
         liste.beiAuswahl = { [weak self] kennung in
@@ -106,7 +157,7 @@ final class RueckwegAnsicht: NSView, NSUserInterfaceValidations {
         mitte.distribution = .fill
         mitte.translatesAutoresizingMaskIntoConstraints = false
 
-        let stapel = NSStackView(views: [kopfzeile, warnzeile, suche, mitte, fuss])
+        let stapel = NSStackView(views: [kopfzeileMitHilfe, warnzeile, suche, mitte, fuss])
         stapel.orientation = .vertical
         stapel.spacing = 10
         stapel.alignment = .leading
@@ -123,6 +174,7 @@ final class RueckwegAnsicht: NSView, NSUserInterfaceValidations {
         for zeile in [kopfzeile, warnzeile] {
             zeile.setContentHuggingPriority(.required, for: .vertical)
         }
+        kopfzeileMitHilfe.setContentHuggingPriority(.required, for: .vertical)
         fuss.setContentHuggingPriority(.required, for: .vertical)
         fuss.setContentCompressionResistancePriority(.required, for: .vertical)
         suche.setContentHuggingPriority(.required, for: .vertical)
@@ -136,7 +188,12 @@ final class RueckwegAnsicht: NSView, NSUserInterfaceValidations {
             liste.widthAnchor.constraint(equalToConstant: 300),
             suche.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
             fuss.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
+            kopfzeileMitHilfe.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -36),
         ])
+    }
+
+    @objc func zeigeTastenkuerzel() {
+        Tastenkuerzel.zeige(ueber: window)
     }
 
     /// Der Bereich unter dem Text, gebaut wie beim Schützen: Trennlinie,
@@ -200,9 +257,10 @@ final class RueckwegAnsicht: NSView, NSUserInterfaceValidations {
         let kopieren = Knoepfe.knopf(
             "Ergebnis kopieren", symbol: "lock.open.fill",
             ziel: self, aktion: #selector(aktionKopieren(_:)),
-            hilfe: "⏎ macht dasselbe"
+            hilfe: "⌘⏎ macht dasselbe, ⏎ in der Liste auch"
         )
         kopieren.keyEquivalent = "\r"
+        kopieren.keyEquivalentModifierMask = [.command]
         if #available(macOS 26.0, *) {
             kopieren.tintProminence = .primary
         } else {
@@ -221,7 +279,8 @@ final class RueckwegAnsicht: NSView, NSUserInterfaceValidations {
         fusszeile.font = .systemFont(ofSize: 12)
         fusszeile.textColor = .tertiaryLabelColor
         fusszeile.preferredMaxLayoutWidth = 900
-        fusszeile.stringValue = "⏎ kopiert · ↑ ↓ Platzhalter · ⌫ ignoriert · ⎋ bricht ab. "
+        fusszeile.stringValue = "⌘⏎ kopiert · ↑ ↓ Platzhalter und ⌫ ignoriert in der Liste · "
+            + "⇥ wechselt zwischen Text und Liste · ⎋ bricht ab. "
             + "Was rot ist, kennt das Wörterbuch nicht: zuordnen, dann geht es dauerhaft auf."
 
         let etikettBreite: CGFloat = 84
@@ -454,8 +513,8 @@ final class RueckwegAnsicht: NSView, NSUserInterfaceValidations {
 
     private func beschrifteKopf() {
         guard !ergebnis.original.isEmpty else {
-            kopfzeile.stringValue = "In der Zwischenablage steht kein Text"
-            warnzeile.stringValue = "Kopiere die KI-Antwort und drücke ⌘N."
+            kopfzeile.stringValue = "Kein Text zum Zurückdrehen"
+            warnzeile.stringValue = "Füge die KI-Antwort hier ein, oder kopiere sie und drücke ⌘N."
             warnzeile.textColor = .secondaryLabelColor
             return
         }
@@ -503,45 +562,73 @@ final class RueckwegAnsicht: NSView, NSUserInterfaceValidations {
         )
     }
 
-    /// Der zurückgedrehte Text mit den eingesetzten Namen hervorgehoben, damit
-    /// du siehst, wo etwas passiert ist.
+    /// Der Text, wie er eingefügt wurde, mit jedem Platzhalter als Chip:
+    /// `PERSON_… → Nyström` in Grün, Unbekanntes in Rot ohne Pfeil,
+    /// Beiseitegelegtes blass. So bleibt der Text Zeichen für Zeichen
+    /// bearbeitbar, und man sieht trotzdem, was eingesetzt wird.
     private func aufbereiteterText(ausgewaehlt: UUID?) -> Chiptext.Ergebnis {
-        let fertig = NSMutableAttributedString(
-            string: ergebnis.ergebnis,
-            attributes: [
-                .font: NSFont.systemFont(ofSize: 13),
-                .foregroundColor: NSColor.labelColor,
-            ]
-        )
-
-        // Von vorn durchgehen und die eingesetzten Stellen einfärben. Der
-        // Versatz ergibt sich aus der Längendifferenz der schon ersetzten.
-        var stellen: [UUID: NSRange] = [:]
-        var versatz = 0
-        for fund in ergebnis.funde.sorted(by: { $0.bereich.location < $1.bereich.location }) {
-            let laenge = (fund.klartext ?? fund.geschrieben).count
-            let bereich = NSRange(location: fund.bereich.location + versatz, length: laenge)
-            versatz += laenge - fund.bereich.length
-            guard bereich.location >= 0, NSMaxRange(bereich) <= fertig.length else { continue }
-
-            let farbe: NSColor = fund.istAufloesbar ? .systemGreen : .systemRed
-            fertig.addAttributes([
-                .backgroundColor: farbe.withAlphaComponent(fund.id == ausgewaehlt ? 0.34 : 0.16),
-                .font: NSFont.monospacedSystemFont(ofSize: 13, weight: .medium),
-            ], range: bereich)
-            if fund.id == ausgewaehlt {
-                fertig.addAttributes([
-                    .underlineStyle: NSUnderlineStyle.thick.rawValue,
-                    .underlineColor: farbe,
-                ], range: bereich)
-            }
-            stellen[fund.id] = bereich
+        let chips = ergebnis.funde.map { fund -> Chiptext.Chip in
+            let farbe: NSColor = fund.istAufloesbar
+                ? .systemGreen
+                : (fund.ignoriert ? .tertiaryLabelColor : .systemRed)
+            return Chiptext.Chip(
+                id: fund.id,
+                bereich: fund.bereich,
+                text: fund.geschrieben,
+                deckname: fund.klartext ?? "",
+                farbe: farbe
+            )
         }
-        return Chiptext.Ergebnis(text: fertig, bereiche: stellen)
+        return Chiptext.aufbauen(original: ergebnis.original, chips: chips, ausgewaehlt: ausgewaehlt)
+    }
+
+    private var textHatFokus: Bool {
+        guard let erster = window?.firstResponder else { return false }
+        return erster === textAnsicht
+    }
+
+    /// Nimmt, was im Textfeld steht, und löst es nach einer kurzen Pause neu
+    /// auf. Beiseitegelegte Platzhalter bleiben beiseitegelegt.
+    private func pruefeNachTippen() {
+        nachdenkpause?.invalidate()
+        nachdenkpause = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: false) { [weak self] _ in
+            self?.pruefeJetzt()
+        }
+    }
+
+    private func pruefeJetzt() {
+        let getippt = Chiptext.originaltext(aus: textAnsicht.attributedString())
+        guard getippt != ergebnis.original else { return }
+        let marke = Chiptext.originalPosition(
+            fuer: textAnsicht.selectedRange().location,
+            in: textAnsicht.attributedString()
+        )
+        let ignoriert = Set(ergebnis.ignorierte.map(\.normal))
+
+        var neu = Rueckweg.analysiere(getippt, woerterbuch: woerterbuch, unbekannte: unbekannte)
+        for fund in neu.funde where ignoriert.contains(fund.normal) {
+            neu.ignoriere(fundId: fund.id)
+        }
+        ergebnis = neu
+        aktualisiere()
+        let stelle = Chiptext.anzeigePosition(fuer: marke, in: textAnsicht.attributedString())
+        textAnsicht.setSelectedRange(NSRange(location: stelle, length: 0))
+        beiAenderung?(ergebnis)
+    }
+
+    func pruefeJetztFuerPruefung() { pruefeJetzt() }
+    func setzeTextFuerPruefung(_ text: String) {
+        textAnsicht.string = text
+        pruefeJetzt()
+    }
+    func darfAendernFuerPruefung(_ bereich: NSRange) -> Bool {
+        textView(textAnsicht, shouldChangeTextIn: bereich, replacementString: "x")
     }
 
     // MARK: Tastatur
 
+    /// Wie beim Schützen: im Text gehören ⏎, ⌫ und die Pfeile dem Text. In
+    /// der Liste wirken sie auf den Platzhalter. ⌥↑ und ⌥↓ gehen überall.
     @discardableResult
     func verarbeite(_ ereignis: NSEvent) -> Bool {
         let zusatz = ereignis.modifierFlags.intersection(.deviceIndependentFlagsMask)
@@ -557,26 +644,31 @@ final class RueckwegAnsicht: NSView, NSUserInterfaceValidations {
                 if zusatz.contains(.shift) { suche.vorheriger() } else { suche.naechster() }
                 return true
             default:
-                return false
+                break
             }
+            // ⌘C und Konsorten gehören der Textansicht, nur ⌘⏎ nicht.
+            if ereignis.keyCode != 36, ereignis.keyCode != 76 { return false }
         }
 
         switch ereignis.keyCode {
-        case 36, 76:
+        case 36, 76 where zusatz.contains(.command) || !textHatFokus:
             beiUebernahme?(ergebnis.ergebnis)
             return true
         case 53:
             beiAbbruch?()
             return true
-        case 126:
+        case 126 where zusatz.contains(.option) || !textHatFokus:
             waehle(auswahl - 1)
             return true
-        case 125:
+        case 125 where zusatz.contains(.option) || !textHatFokus:
             waehle(auswahl + 1)
             return true
-        case 51, 117:
-            // ⌫ und ⌦, wie im Schützen-Modus das Verwerfen.
+        case 51 where !textHatFokus, 117 where !textHatFokus:
+            // ⌫ und ⌦ in der Liste, wie beim Schützen das Verwerfen.
             aktionIgnorieren(nil)
+            return true
+        case 48:  // Tabulator: zwischen Text und Liste wechseln
+            if textHatFokus { fokussiereFundstellen() } else { window?.makeFirstResponder(textAnsicht) }
             return true
         default:
             return false
@@ -608,9 +700,43 @@ final class RueckwegAnsicht: NSView, NSUserInterfaceValidations {
             return
         }
 
-        ergebnis = Rueckweg.analysiere(text, woerterbuch: woerterbuch, unbekannte: unbekannte)
-        auswahl = 0
-        meldung.isHidden = true
-        aktualisiere()
+        setze(ergebnis: Rueckweg.analysiere(text, woerterbuch: woerterbuch, unbekannte: unbekannte))
+        beiAenderung?(ergebnis)
+    }
+}
+
+extension RueckwegAnsicht: NSTextViewDelegate {
+
+    /// Klick auf einen Chip wählt ihn aus.
+    func textView(_ ansicht: NSTextView, clickedOnLink verweis: Any, at zeichen: Int) -> Bool {
+        let text = (verweis as? URL)?.absoluteString ?? (verweis as? String) ?? ""
+        guard let uuid = UUID(uuidString: text.replacingOccurrences(of: "fund://", with: "")) else { return false }
+        waehleFund(uuid)
+        return true
+    }
+
+    func textView(
+        _ ansicht: NSTextView,
+        shouldChangeTextIn bereich: NSRange,
+        replacementString ersatz: String?
+    ) -> Bool {
+        guard ansicht === textAnsicht else { return true }
+        switch Chiptext.pruefeAenderung(
+            bereich: bereich, ersatz: ersatz, in: textAnsicht.attributedString(), chips: bereiche
+        ) {
+        case .erlaubt:
+            return true
+        case .verboten:
+            meldeFehler("Den eingesetzten Namen kann man hier nicht ändern — im Wörterbuch schon.")
+            return false
+        case .ausweiten(let ganz):
+            Chiptext.loescheSpaeter(ganz, in: textAnsicht)
+            return false
+        }
+    }
+
+    func textDidChange(_ meldung: Notification) {
+        guard meldung.object as AnyObject? === textAnsicht else { return }
+        pruefeNachTippen()
     }
 }

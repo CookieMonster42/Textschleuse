@@ -3,11 +3,17 @@ import TextschleuseCore
 
 /// Das Fenster für alle, die nicht über Kurzbefehle arbeiten wollen.
 ///
-/// Es zeigt dieselben Arbeitsflächen wie die Popups, aber mit einem Feld zum
-/// Einfügen davor und Knöpfen statt Tasten. Jeder Knopf sagt in seinem
-/// Hilfetext, welche Taste dasselbe macht — wer will, wächst so in die
-/// Tastatur hinein.
+/// Ein Textfeld, zwei Richtungen. Der Umschalter oben sagt, was mit dem
+/// Text geschehen soll: Schützen oder Zurückdrehen. Beim Umschalten bleibt
+/// der Text stehen und wird in der anderen Richtung geprüft — es sind nicht
+/// zwei Fenster mit zwei Texten, sondern eines. Nur die Verläufe sind
+/// getrennt, weil eine Anfrage und ihre Antwort verschiedene Texte sind.
 final class Hauptfenster: NSWindowController {
+
+    enum Modus: Int {
+        case schuetzen = 0
+        case zurueckdrehen = 1
+    }
 
     private static var offen: Hauptfenster?
 
@@ -20,29 +26,29 @@ final class Hauptfenster: NSWindowController {
     /// Die Texte dieser Sitzung. Geteilt mit den Popups, damit beide Wege
     /// denselben Stand sehen.
     private let sitzung: Sitzung
-    /// Der Vorgang, an dem dieses Fenster gerade arbeitet.
+    /// Die Vorgänge, an denen dieses Fenster gerade arbeitet — einer je
+    /// Richtung.
     private var laufenderVorgang: UUID?
+    private var laufenderRueckweg: UUID?
 
-    private let reiter = NSTabView()
-    private var schutzAnsicht: SchutzAnsicht?
-    private var rueckwegAnsicht: RueckwegAnsicht?
+    private(set) var modus: Modus = .schuetzen
+    private let modusWahl = NSSegmentedControl(
+        labels: ["Schützen", "Zurückdrehen"],
+        trackingMode: .selectOne,
+        target: nil,
+        action: nil
+    )
+    private let arbeitsflaeche = NSView()
+    private let schutzAnsicht: SchutzAnsicht
+    private let rueckwegAnsicht: RueckwegAnsicht
 
-    private let schutzEingabe = Eingabeflaeche(
-        titel: "Text einfügen, der geschützt werden soll",
-        knopf: "Prüfen"
-    )
-    private let rueckwegEingabe = Eingabeflaeche(
-        titel: "KI-Antwort einfügen, deren Platzhalter zurückgedreht werden sollen",
-        knopf: "Zurückdrehen"
-    )
-    private let schutzBehaelter = NSView()
-    private let rueckwegBehaelter = NSView()
     private let verlaufWahl = NSPopUpButton()
-    private let verlaufEtikett = NSTextField(labelWithString: "Zuletzt bearbeitet")
+    private let verlaufEtikett = NSTextField(labelWithString: "Diese Sitzung")
     /// Das Wörterbuch als feste Spalte rechts. Es hängt am Fenster, nicht an
-    /// der Arbeitsfläche — die entsteht erst, wenn ein Text da ist, und bis
-    /// dahin wäre die Spalte leer geblieben.
+    /// der Arbeitsfläche.
     private var woerterbuchSpalte: WoerterbuchAnsicht?
+    /// Das Tastenkürzel-Blatt kommt einmal je Fensterleben beim Öffnen.
+    private var startblattGezeigt = false
 
     static func zeige(
         woerterbuch: @escaping () -> Woerterbuch,
@@ -85,6 +91,14 @@ final class Hauptfenster: NSWindowController {
         self.beimSchuetzen = beimSchuetzen
         self.beimZurueckdrehen = beimZurueckdrehen
 
+        let buch = woerterbuch()
+        schutzAnsicht = SchutzAnsicht(analyse: Schleuse.analysiere("", woerterbuch: buch))
+        rueckwegAnsicht = RueckwegAnsicht(
+            ergebnis: Rueckweg.analysiere("", woerterbuch: buch, unbekannte: sitzung.unbekannte),
+            woerterbuch: buch,
+            unbekannte: sitzung.unbekannte
+        )
+
         let fenster = NSWindow(
             contentRect: NSRect(origin: .zero, size: Hauptfenster.startgroesse()),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -103,11 +117,21 @@ final class Hauptfenster: NSWindowController {
 
         fenster.delegate = self
         baueOberflaeche()
+        verdrahteAnsichten()
         zeigeNeuesten()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("nicht unterstützt") }
+
+    /// Beim ersten Öffnen liegt die Tastenkürzel-Übersicht obenauf, solange
+    /// das in ihr angehakt ist.
+    override func showWindow(_ absender: Any?) {
+        super.showWindow(absender)
+        guard !startblattGezeigt else { return }
+        startblattGezeigt = true
+        Tastenkuerzel.zeigeBeimStart(ueber: window)
+    }
 
     /// Wunschmaß, aber nie größer als der Bildschirm hergibt. Ein Fenster, das
     /// beim Öffnen alles verdeckt, zwingt dich zum Verkleinern, bevor du
@@ -125,46 +149,34 @@ final class Hauptfenster: NSWindowController {
         )
     }
 
+    // MARK: Aufbau
+
     private func baueOberflaeche() {
-        schutzEingabe.beiAusloesen = { [weak self] text in self?.pruefe(text) }
-        rueckwegEingabe.beiAusloesen = { [weak self] text in self?.dreheZurueck(text) }
-
-        for (behaelter, eingabe) in [
-            (schutzBehaelter, schutzEingabe),
-            (rueckwegBehaelter, rueckwegEingabe),
-        ] {
-            eingabe.translatesAutoresizingMaskIntoConstraints = false
-            behaelter.addSubview(eingabe)
-            NSLayoutConstraint.activate([
-                eingabe.topAnchor.constraint(equalTo: behaelter.topAnchor),
-                eingabe.leadingAnchor.constraint(equalTo: behaelter.leadingAnchor),
-                eingabe.trailingAnchor.constraint(equalTo: behaelter.trailingAnchor),
-                eingabe.bottomAnchor.constraint(equalTo: behaelter.bottomAnchor),
-            ])
-        }
-
-        let schuetzen = NSTabViewItem(identifier: "schuetzen")
-        schuetzen.label = "Schützen"
-        schuetzen.view = schutzBehaelter
-
-        let zurueck = NSTabViewItem(identifier: "rueckweg")
-        zurueck.label = "Zurückdrehen"
-        zurueck.view = rueckwegBehaelter
-
-        reiter.addTabViewItem(schuetzen)
-        reiter.addTabViewItem(zurueck)
-        reiter.translatesAutoresizingMaskIntoConstraints = false
+        modusWahl.selectedSegment = 0
+        modusWahl.target = self
+        modusWahl.action = #selector(modusGewaehlt)
+        modusWahl.segmentStyle = .rounded
+        modusWahl.setToolTip("Namen durch Decknamen ersetzen", forSegment: 0)
+        modusWahl.setToolTip("Decknamen in einer Antwort wieder auflösen", forSegment: 1)
+        modusWahl.translatesAutoresizingMaskIntoConstraints = false
 
         verlaufEtikett.font = .systemFont(ofSize: 11)
         verlaufEtikett.textColor = .secondaryLabelColor
         verlaufWahl.target = self
         verlaufWahl.action = #selector(verlaufGewaehlt)
-        verlaufWahl.toolTip = "Die Texte dieser Sitzung. Nach dem Beenden sind sie weg."
+        verlaufWahl.toolTip = "Die Texte dieser Sitzung in dieser Richtung. Nach dem Beenden sind sie weg."
+        // Der längste Eintrag darf das Fenster nicht breiter zwingen: lieber
+        // wird der Titel abgeschnitten.
+        verlaufWahl.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        (verlaufWahl.cell as? NSPopUpButtonCell)?.lineBreakMode = .byTruncatingTail
 
-        let verlaufZeile = NSStackView(views: [verlaufEtikett, verlaufWahl])
-        verlaufZeile.orientation = .horizontal
-        verlaufZeile.spacing = 8
-        verlaufZeile.translatesAutoresizingMaskIntoConstraints = false
+        let kopfzeile = NSStackView(views: [modusWahl, verlaufEtikett, verlaufWahl])
+        kopfzeile.orientation = .horizontal
+        kopfzeile.spacing = 8
+        kopfzeile.setCustomSpacing(20, after: modusWahl)
+        kopfzeile.translatesAutoresizingMaskIntoConstraints = false
+
+        arbeitsflaeche.translatesAutoresizingMaskIntoConstraints = false
 
         let spalte = WoerterbuchAnsicht(
             woerterbuch: woerterbuch(),
@@ -172,9 +184,10 @@ final class Hauptfenster: NSWindowController {
             beimSichern: { [weak self] geaendert in
                 guard let self else { return }
                 self.beimWoerterbuch(geaendert)
-                // Der laufende Text muss nachziehen: was gerade gemerkt
-                // wurde, gilt ab jetzt auch für ihn.
-                self.schutzAnsicht?.uebernimmWoerterbuch(geaendert)
+                // Beide Richtungen müssen nachziehen: was gerade gemerkt
+                // wurde, gilt ab jetzt auch für den laufenden Text.
+                self.schutzAnsicht.uebernimmWoerterbuch(geaendert)
+                self.rueckwegAnsicht.setze(woerterbuch: geaendert)
             },
             beimExportieren: { _, _ in }
         )
@@ -188,20 +201,21 @@ final class Hauptfenster: NSWindowController {
         let inhalt = NSView()
         let anteil = spalte.widthAnchor.constraint(equalTo: inhalt.widthAnchor, multiplier: 0.33)
         anteil.priority = .defaultHigh
-        inhalt.addSubview(verlaufZeile)
-        inhalt.addSubview(reiter)
+        inhalt.addSubview(kopfzeile)
+        inhalt.addSubview(arbeitsflaeche)
         inhalt.addSubview(trenner)
         inhalt.addSubview(spalte)
         NSLayoutConstraint.activate([
-            verlaufZeile.topAnchor.constraint(equalTo: inhalt.topAnchor, constant: 12),
-            verlaufZeile.leadingAnchor.constraint(equalTo: inhalt.leadingAnchor, constant: 12),
-            verlaufZeile.trailingAnchor.constraint(lessThanOrEqualTo: trenner.leadingAnchor, constant: -12),
-            verlaufWahl.widthAnchor.constraint(greaterThanOrEqualToConstant: 420),
+            kopfzeile.topAnchor.constraint(equalTo: inhalt.topAnchor, constant: 12),
+            kopfzeile.leadingAnchor.constraint(equalTo: inhalt.leadingAnchor, constant: 12),
+            kopfzeile.trailingAnchor.constraint(lessThanOrEqualTo: trenner.leadingAnchor, constant: -12),
+            verlaufWahl.widthAnchor.constraint(greaterThanOrEqualToConstant: 240),
+            verlaufWahl.widthAnchor.constraint(lessThanOrEqualToConstant: 520),
 
-            reiter.topAnchor.constraint(equalTo: verlaufZeile.bottomAnchor, constant: 10),
-            reiter.leadingAnchor.constraint(equalTo: inhalt.leadingAnchor, constant: 12),
-            reiter.trailingAnchor.constraint(equalTo: trenner.leadingAnchor, constant: -12),
-            reiter.bottomAnchor.constraint(equalTo: inhalt.bottomAnchor, constant: -12),
+            arbeitsflaeche.topAnchor.constraint(equalTo: kopfzeile.bottomAnchor, constant: 4),
+            arbeitsflaeche.leadingAnchor.constraint(equalTo: inhalt.leadingAnchor),
+            arbeitsflaeche.trailingAnchor.constraint(equalTo: trenner.leadingAnchor, constant: -12),
+            arbeitsflaeche.bottomAnchor.constraint(equalTo: inhalt.bottomAnchor),
 
             trenner.topAnchor.constraint(equalTo: inhalt.topAnchor, constant: 12),
             trenner.bottomAnchor.constraint(equalTo: inhalt.bottomAnchor, constant: -12),
@@ -220,73 +234,145 @@ final class Hauptfenster: NSWindowController {
         window?.contentView = inhalt
     }
 
+    private func verdrahteAnsichten() {
+        schutzAnsicht.beiUebernahme = { [weak self] analyse, merken in
+            self?.beimSchuetzen(analyse, merken)
+            self?.schutzAnsicht.meldeKopiert()
+        }
+        // ⎋ im Fenster: nichts. Der Text bleibt, wie er ist — ein Fenster
+        // hat kein „Abbrechen", nur das Popup.
+        schutzAnsicht.beiAbbruch = {}
+        schutzAnsicht.beiAenderung = { [weak self] stand in
+            guard let self else { return }
+            if let kennung = self.laufenderVorgang {
+                self.sitzung.aktualisiere(kennung, mit: stand)
+            } else if !stand.original.isEmpty {
+                // Der erste getippte Text ist ein neuer Vorgang.
+                self.laufenderVorgang = self.sitzung.beginne(stand)
+            }
+            if self.modus == .schuetzen { self.aktualisiereVerlauf() }
+            // Wächst das Wörterbuch beim Schützen, zeigt die Spalte es
+            // sofort — nicht erst beim nächsten Öffnen.
+            self.woerterbuchSpalte?.setze(woerterbuch: stand.woerterbuch)
+            self.woerterbuchSpalte?.setze(imText: Set(stand.aktiveFunde.compactMap(\.eintragId)))
+        }
+        schutzAnsicht.beiWoerterbuchAenderung = { [weak self] geaendert in
+            self?.beimWoerterbuch(geaendert)
+            self?.woerterbuchSpalte?.setze(woerterbuch: geaendert)
+            self?.rueckwegAnsicht.setze(woerterbuch: geaendert)
+        }
+        // Die Klappe braucht es hier nicht: das Wörterbuch steht schon als
+        // feste Spalte rechts im Fenster.
+        schutzAnsicht.verbergeKlappenknopf()
+
+        rueckwegAnsicht.beiUebernahme = { [weak self] fertig in
+            self?.beimZurueckdrehen(fertig)
+        }
+        rueckwegAnsicht.beiAbbruch = {}
+        rueckwegAnsicht.beiAenderung = { [weak self] stand in
+            guard let self else { return }
+            if let kennung = self.laufenderRueckweg {
+                self.sitzung.aktualisiereRueckweg(kennung, mit: stand.original)
+            } else if !stand.original.isEmpty {
+                self.laufenderRueckweg = self.sitzung.beginneRueckweg(stand.original)
+            }
+            if self.modus == .zurueckdrehen { self.aktualisiereVerlauf() }
+        }
+        rueckwegAnsicht.beiWoerterbuchAenderung = { [weak self] geaendert in
+            self?.beimWoerterbuch(geaendert)
+            self?.woerterbuchSpalte?.setze(woerterbuch: geaendert)
+            self?.schutzAnsicht.uebernimmWoerterbuch(geaendert)
+        }
+    }
+
+    // MARK: Richtung
+
+    var aktuelleAnsicht: NSView {
+        modus == .schuetzen ? schutzAnsicht : rueckwegAnsicht
+    }
+
+    /// Der Text, der gerade im Fenster steht — in beiden Richtungen derselbe.
+    var aktuellerText: String {
+        modus == .schuetzen ? schutzAnsicht.analyse.original : rueckwegAnsicht.ergebnis.original
+    }
+
+    @objc private func modusGewaehlt() {
+        wechsle(zu: Modus(rawValue: modusWahl.selectedSegment) ?? .schuetzen)
+    }
+
+    /// Schaltet die Richtung um. Der Text bleibt; er wird nur in der anderen
+    /// Richtung geprüft. Steht er dort schon, gibt es nichts zu tun.
+    func wechsle(zu neuer: Modus) {
+        guard neuer != modus else { return }
+        let text = aktuellerText
+        modus = neuer
+        modusWahl.selectedSegment = neuer.rawValue
+
+        switch neuer {
+        case .schuetzen:
+            if schutzAnsicht.analyse.original != text {
+                pruefe(text)
+            } else {
+                zeige(schutzAnsicht)
+            }
+        case .zurueckdrehen:
+            if rueckwegAnsicht.ergebnis.original != text {
+                dreheZurueck(text)
+            } else {
+                zeige(rueckwegAnsicht)
+            }
+        }
+        aktualisiereVerlauf()
+    }
+
     // MARK: Schützen
 
-    /// Holt sich, was in der Zwischenablage liegt, und prüft es sofort. Der
-    /// Weg für alle, die den Kurzbefehl nicht benutzen wollen.
+    /// Holt sich, was in der Zwischenablage liegt, in die laufende Richtung.
     func ausZwischenablage() {
-        reiter.selectTabViewItem(at: 0)
-        guard let text = Zwischenablage.lies(), !text.isEmpty else {
-            zurueckZurEingabe()
-            schutzEingabe.melde("In der Zwischenablage steht kein Text.")
-            return
+        if modus == .schuetzen {
+            schutzAnsicht.aktionNeuerText(nil)
+        } else {
+            rueckwegAnsicht.aktionNeuerText(nil)
         }
-        pruefe(text)
     }
 
     /// Holt den neuesten Vorgang der Sitzung ins Fenster. Ohne das säße hier
     /// noch der Text von vorhin, während im Popup längst ein anderer läuft.
     func zeigeNeuesten() {
+        if modus == .schuetzen, let neuester = sitzung.neuester, neuester.id != laufenderVorgang {
+            laufenderVorgang = neuester.id
+            zeigeAnalyse(neuester.analyse)
+        } else {
+            zeige(aktuelleAnsicht)
+        }
         aktualisiereVerlauf()
-        guard let neuester = sitzung.neuester else { return }
-        laufenderVorgang = neuester.id
-        zeigeAnalyse(neuester.analyse)
     }
 
     private func pruefe(_ text: String) {
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            schutzEingabe.melde("Da ist kein Text.")
-            return
-        }
-
         let analyse = Schleuse.analysiere(text, woerterbuch: woerterbuch())
-        laufenderVorgang = sitzung.beginne(analyse)
+        laufenderVorgang = text.isEmpty ? nil : sitzung.beginne(analyse)
         zeigeAnalyse(analyse)
         aktualisiereVerlauf()
     }
 
     private func zeigeAnalyse(_ analyse: Analyse) {
         woerterbuchSpalte?.setze(imText: Set(analyse.aktiveFunde.compactMap(\.eintragId)))
-        if let vorhanden = schutzAnsicht {
-            vorhanden.setze(analyse: analyse)
-        } else {
-            let ansicht = SchutzAnsicht(analyse: analyse)
-            ansicht.beiUebernahme = { [weak self] analyse, merken in
-                self?.beimSchuetzen(analyse, merken)
-                self?.schutzEingabe.melde("In die Zwischenablage gelegt. Jetzt im KI-Tool einfügen.")
-            }
-            ansicht.beiAbbruch = { [weak self] in self?.zurueckZurEingabe() }
-            ansicht.beiAenderung = { [weak self] stand in
-                guard let self, let kennung = self.laufenderVorgang else { return }
-                self.sitzung.aktualisiere(kennung, mit: stand)
-                self.aktualisiereVerlauf()
-                // Wächst das Wörterbuch beim Schützen, zeigt die Spalte es
-                // sofort — nicht erst beim nächsten Öffnen.
-                self.woerterbuchSpalte?.setze(woerterbuch: stand.woerterbuch)
-                self.woerterbuchSpalte?.setze(imText: Set(stand.aktiveFunde.compactMap(\.eintragId)))
-            }
-            ansicht.beiWoerterbuchAenderung = { [weak self] geaendert in
-                self?.beimWoerterbuch(geaendert)
-                self?.woerterbuchSpalte?.setze(woerterbuch: geaendert)
-            }
-            // Die Klappe braucht es hier nicht: das Wörterbuch steht schon
-            // als feste Spalte rechts im Fenster.
-            ansicht.verbergeKlappenknopf()
-            schutzAnsicht = ansicht
-        }
-        zeige(schutzAnsicht, in: schutzBehaelter, statt: schutzEingabe)
-        // Fokus in die Fundstellenliste: dort navigieren die Pfeiltasten.
-        schutzAnsicht?.fokussiereFundstellen()
+        schutzAnsicht.setze(analyse: analyse)
+        zeige(schutzAnsicht)
+    }
+
+    // MARK: Rückweg
+
+    private func dreheZurueck(_ text: String) {
+        let ergebnis = Rueckweg.analysiere(
+            text,
+            woerterbuch: woerterbuch(),
+            unbekannte: sitzung.unbekannte
+        )
+        laufenderRueckweg = text.isEmpty ? nil : sitzung.beginneRueckweg(text)
+        rueckwegAnsicht.setze(ergebnis: ergebnis, woerterbuch: woerterbuch(), unbekannte: sitzung.unbekannte)
+        zeige(rueckwegAnsicht)
+        aktualisiereVerlauf()
     }
 
     // MARK: Verlauf
@@ -297,92 +383,72 @@ final class Hauptfenster: NSWindowController {
         format.timeStyle = .short
 
         verlaufWahl.removeAllItems()
-        for vorgang in sitzung.vorgaenge {
-            verlaufWahl.addItem(withTitle: "\(format.string(from: vorgang.zeitpunkt))  ·  \(vorgang.vorschau)")
-            verlaufWahl.lastItem?.representedObject = vorgang.id
+        let eintraege: [(UUID, Date, String)] = modus == .schuetzen
+            ? sitzung.vorgaenge.map { ($0.id, $0.zeitpunkt, $0.vorschau) }
+            : sitzung.rueckwegVorgaenge.map { ($0.id, $0.zeitpunkt, $0.vorschau) }
+        for (kennung, zeitpunkt, vorschau) in eintraege {
+            verlaufWahl.addItem(withTitle: "\(format.string(from: zeitpunkt))  ·  \(vorschau)")
+            verlaufWahl.lastItem?.representedObject = kennung
         }
-        if sitzung.vorgaenge.isEmpty {
+        if eintraege.isEmpty {
             verlaufWahl.addItem(withTitle: "Noch nichts bearbeitet")
         }
-        verlaufWahl.isEnabled = !sitzung.vorgaenge.isEmpty
-        verlaufEtikett.stringValue = sitzung.vorgaenge.count > 1
-            ? "Diese Sitzung (\(sitzung.vorgaenge.count))"
+        verlaufWahl.isEnabled = !eintraege.isEmpty
+        verlaufEtikett.stringValue = eintraege.count > 1
+            ? "Diese Sitzung (\(eintraege.count))"
             : "Diese Sitzung"
 
-        if let laufenderVorgang,
-           let index = sitzung.vorgaenge.firstIndex(where: { $0.id == laufenderVorgang }) {
+        let laufend = modus == .schuetzen ? laufenderVorgang : laufenderRueckweg
+        if let laufend, let index = eintraege.firstIndex(where: { $0.0 == laufend }) {
             verlaufWahl.selectItem(at: index)
         }
     }
 
     @objc private func verlaufGewaehlt() {
-        guard let kennung = verlaufWahl.selectedItem?.representedObject as? UUID,
-              kennung != laufenderVorgang,
-              let vorgang = sitzung.vorgang(kennung)
-        else { return }
-        reiter.selectTabViewItem(at: 0)
-        laufenderVorgang = kennung
-        zeigeAnalyse(vorgang.analyse)
-    }
-
-    private func zurueckZurEingabe() {
-        zeige(schutzEingabe, in: schutzBehaelter, statt: schutzAnsicht)
-        schutzAnsicht = nil
-    }
-
-    // MARK: Rückweg
-
-    private func dreheZurueck(_ text: String) {
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            rueckwegEingabe.melde("Da ist kein Text.")
-            return
-        }
-
-        let ergebnis = Rueckweg.analysiere(
-            text,
-            woerterbuch: woerterbuch(),
-            unbekannte: sitzung.unbekannte
-        )
-        if let vorhanden = rueckwegAnsicht {
-            vorhanden.setze(ergebnis: ergebnis)
-        } else {
-            let ansicht = RueckwegAnsicht(
-                ergebnis: ergebnis,
+        guard let kennung = verlaufWahl.selectedItem?.representedObject as? UUID else { return }
+        switch modus {
+        case .schuetzen:
+            guard kennung != laufenderVorgang, let vorgang = sitzung.vorgang(kennung) else { return }
+            laufenderVorgang = kennung
+            zeigeAnalyse(vorgang.analyse)
+        case .zurueckdrehen:
+            guard kennung != laufenderRueckweg, let vorgang = sitzung.rueckwegVorgang(kennung) else { return }
+            laufenderRueckweg = kennung
+            rueckwegAnsicht.setze(
+                ergebnis: Rueckweg.analysiere(
+                    vorgang.text,
+                    woerterbuch: woerterbuch(),
+                    unbekannte: sitzung.unbekannte
+                ),
                 woerterbuch: woerterbuch(),
                 unbekannte: sitzung.unbekannte
             )
-            ansicht.beiUebernahme = { [weak self] fertig in
-                self?.beimZurueckdrehen(fertig)
-                self?.rueckwegEingabe.melde("In die Zwischenablage gelegt.")
-            }
-            ansicht.beiWoerterbuchAenderung = { [weak self] geaendert in
-                self?.beimWoerterbuch(geaendert)
-            }
-            ansicht.beiAbbruch = { [weak self] in
-                guard let self else { return }
-                self.zeige(self.rueckwegEingabe, in: self.rueckwegBehaelter, statt: self.rueckwegAnsicht)
-                self.rueckwegAnsicht = nil
-            }
-            rueckwegAnsicht = ansicht
+            zeige(rueckwegAnsicht)
         }
-        zeige(rueckwegAnsicht, in: rueckwegBehaelter, statt: rueckwegEingabe)
-        rueckwegAnsicht?.fokussiereFundstellen()
     }
 
     // MARK: Umschalten
 
-    private func zeige(_ neue: NSView?, in behaelter: NSView, statt alte: NSView?) {
-        guard let neue else { return }
-        alte?.removeFromSuperview()
-        guard neue.superview !== behaelter else { return }
-        neue.translatesAutoresizingMaskIntoConstraints = false
-        behaelter.addSubview(neue)
-        NSLayoutConstraint.activate([
-            neue.topAnchor.constraint(equalTo: behaelter.topAnchor),
-            neue.leadingAnchor.constraint(equalTo: behaelter.leadingAnchor),
-            neue.trailingAnchor.constraint(equalTo: behaelter.trailingAnchor),
-            neue.bottomAnchor.constraint(equalTo: behaelter.bottomAnchor),
-        ])
+    private func zeige(_ neue: NSView) {
+        for alte in arbeitsflaeche.subviews where alte !== neue {
+            alte.removeFromSuperview()
+        }
+        if neue.superview !== arbeitsflaeche {
+            neue.translatesAutoresizingMaskIntoConstraints = false
+            arbeitsflaeche.addSubview(neue)
+            NSLayoutConstraint.activate([
+                neue.topAnchor.constraint(equalTo: arbeitsflaeche.topAnchor),
+                neue.leadingAnchor.constraint(equalTo: arbeitsflaeche.leadingAnchor),
+                neue.trailingAnchor.constraint(equalTo: arbeitsflaeche.trailingAnchor),
+                neue.bottomAnchor.constraint(equalTo: arbeitsflaeche.bottomAnchor),
+            ])
+        }
+        // Fokus dorthin, wo es weitergeht: in die Liste, sonst in den Text.
+        if neue === schutzAnsicht {
+            schutzAnsicht.fokussiereFundstellen()
+        } else {
+            rueckwegAnsicht.fokussiereFundstellen()
+        }
     }
 }
 
@@ -390,108 +456,5 @@ extension Hauptfenster: NSWindowDelegate {
 
     func windowWillClose(_ meldung: Notification) {
         Hauptfenster.offen = nil
-    }
-}
-
-/// Das Feld zum Einfügen, mit Knopf daneben.
-///
-/// Der Text liegt in einer editierbaren Ansicht statt in einem Feld, damit
-/// mehrzeilige Mails Platz haben und ⌘V ohne Umweg funktioniert.
-final class Eingabeflaeche: NSView {
-
-    var beiAusloesen: ((String) -> Void)?
-
-    private let flaeche = Textflaeche.bauen()
-    private let ueberschrift: NSTextField
-    private let ausloeser: NSButton
-    private let ausZwischenablage = NSButton()
-    private let meldung = NSTextField(labelWithString: "")
-
-    init(titel: String, knopf: String) {
-        ueberschrift = NSTextField(labelWithString: titel)
-        ausloeser = NSButton(title: knopf, target: nil, action: nil)
-        super.init(frame: .zero)
-
-        ueberschrift.font = .systemFont(ofSize: 13, weight: .semibold)
-
-        // Die Textfläche ist sonst nur zum Lesen da; hier soll man tippen.
-        flaeche.text.isEditable = true
-        flaeche.text.font = .systemFont(ofSize: 13)
-        flaeche.text.isAutomaticQuoteSubstitutionEnabled = false
-        flaeche.text.isRichText = false
-        flaeche.text.allowsUndo = true
-
-        ausloeser.bezelStyle = .rounded
-        ausloeser.keyEquivalent = "\r"
-        ausloeser.target = self
-        ausloeser.action = #selector(ausgeloest)
-
-        ausZwischenablage.title = "Aus Zwischenablage einfügen"
-        ausZwischenablage.bezelStyle = .rounded
-        ausZwischenablage.target = self
-        ausZwischenablage.action = #selector(zwischenablageHolen)
-        ausZwischenablage.toolTip = "Nimmt, was gerade kopiert ist"
-
-        meldung.font = .systemFont(ofSize: 11)
-        meldung.textColor = .secondaryLabelColor
-
-        let knopfleiste = NSStackView(views: [ausZwischenablage, ausloeser, meldung])
-        knopfleiste.orientation = .horizontal
-        knopfleiste.spacing = 8
-        knopfleiste.translatesAutoresizingMaskIntoConstraints = false
-
-        let hinweis = NSTextField(wrappingLabelWithString:
-            "Läuft komplett auf diesem Rechner. Es geht nichts ins Netz. "
-            + "Der Kurzbefehl ⌃⌥⌘S macht dasselbe, ohne dieses Fenster zu öffnen.")
-        hinweis.font = .systemFont(ofSize: 11)
-        hinweis.textColor = .tertiaryLabelColor
-
-        let stapel = NSStackView(views: [ueberschrift, flaeche.rolle, knopfleiste, hinweis])
-        stapel.orientation = .vertical
-        stapel.spacing = 10
-        stapel.alignment = .leading
-        stapel.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
-        stapel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(stapel)
-
-        ueberschrift.setContentHuggingPriority(.required, for: .vertical)
-        knopfleiste.setContentHuggingPriority(.required, for: .vertical)
-        hinweis.setContentHuggingPriority(.required, for: .vertical)
-
-        NSLayoutConstraint.activate([
-            stapel.topAnchor.constraint(equalTo: topAnchor),
-            stapel.leadingAnchor.constraint(equalTo: leadingAnchor),
-            stapel.trailingAnchor.constraint(equalTo: trailingAnchor),
-            stapel.bottomAnchor.constraint(equalTo: bottomAnchor),
-            flaeche.rolle.widthAnchor.constraint(equalTo: stapel.widthAnchor, constant: -32),
-            flaeche.rolle.heightAnchor.constraint(greaterThanOrEqualToConstant: 240),
-        ])
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("nicht unterstützt") }
-
-    func melde(_ text: String) {
-        meldung.stringValue = text
-    }
-
-    /// Für den Selbsttest: Text setzen und auslösen ohne Tastatur.
-    func setzeText(_ text: String) { flaeche.text.string = text }
-
-    func loeseAus() { ausgeloest() }
-
-    @objc private func ausgeloest() {
-        meldung.stringValue = ""
-        beiAusloesen?(flaeche.text.string)
-    }
-
-    @objc private func zwischenablageHolen() {
-        guard let text = Zwischenablage.lies(), !text.isEmpty else {
-            melde("In der Zwischenablage steht kein Text.")
-            return
-        }
-        flaeche.text.string = text
-        melde("")
-        ausgeloest()
     }
 }

@@ -21,16 +21,29 @@ final class Sitzung {
         var zeitpunkt: Date
 
         /// Der Anfang des Textes, für die Liste im Fenster.
-        var vorschau: String {
-            let eineZeile = analyse.original
-                .replacingOccurrences(of: "\n", with: " ")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !eineZeile.isEmpty else { return "(leer)" }
-            return eineZeile.count > 60 ? String(eineZeile.prefix(60)) + " …" : eineZeile
-        }
+        var vorschau: String { Sitzung.vorschau(analyse.original) }
+    }
+
+    /// Ein Text, der zurückgedreht wurde. Eigener Verlauf, weil es ein
+    /// anderer Text ist: die Antwort, nicht die Anfrage.
+    struct RueckwegVorgang: Identifiable {
+        let id: UUID
+        var text: String
+        var zeitpunkt: Date
+
+        var vorschau: String { Sitzung.vorschau(text) }
+    }
+
+    static func vorschau(_ text: String) -> String {
+        let eineZeile = text
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !eineZeile.isEmpty else { return "(leer)" }
+        return eineZeile.count > 60 ? String(eineZeile.prefix(60)) + " …" : eineZeile
     }
 
     private(set) var vorgaenge: [Vorgang] = []
+    private(set) var rueckwegVorgaenge: [RueckwegVorgang] = []
 
     /// Alle Sitzungsplatzhalter, die je vergeben wurden — nicht nur die des
     /// letzten Textes. Sonst ließe sich die Antwort auf die vorletzte Mail
@@ -38,6 +51,7 @@ final class Sitzung {
     private(set) var unbekannte: [String: String] = [:]
 
     var neuester: Vorgang? { vorgaenge.first }
+    var neuesterRueckweg: RueckwegVorgang? { rueckwegVorgaenge.first }
 
     /// Legt einen neuen Vorgang an und gibt seine Kennung zurück.
     @discardableResult
@@ -67,8 +81,35 @@ final class Sitzung {
         vorgaenge.first { $0.id == kennung }
     }
 
+    // MARK: Rückweg
+
+    @discardableResult
+    func beginneRueckweg(_ text: String, jetzt: Date = Date()) -> UUID {
+        let vorgang = RueckwegVorgang(id: UUID(), text: text, zeitpunkt: jetzt)
+        rueckwegVorgaenge.insert(vorgang, at: 0)
+        if rueckwegVorgaenge.count > Self.hoechstzahl {
+            rueckwegVorgaenge.removeLast(rueckwegVorgaenge.count - Self.hoechstzahl)
+        }
+        return vorgang.id
+    }
+
+    func aktualisiereRueckweg(_ kennung: UUID, mit text: String, jetzt: Date = Date()) {
+        guard let index = rueckwegVorgaenge.firstIndex(where: { $0.id == kennung }) else { return }
+        rueckwegVorgaenge[index].text = text
+        rueckwegVorgaenge[index].zeitpunkt = jetzt
+        if index != 0 {
+            let vorgang = rueckwegVorgaenge.remove(at: index)
+            rueckwegVorgaenge.insert(vorgang, at: 0)
+        }
+    }
+
+    func rueckwegVorgang(_ kennung: UUID) -> RueckwegVorgang? {
+        rueckwegVorgaenge.first { $0.id == kennung }
+    }
+
     func leere() {
         vorgaenge.removeAll()
+        rueckwegVorgaenge.removeAll()
         unbekannte.removeAll()
     }
 

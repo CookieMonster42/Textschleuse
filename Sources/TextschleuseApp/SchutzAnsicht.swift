@@ -59,6 +59,7 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
     /// außen aufgeklappt und dort auch nicht zuklappbar.
     private var woerterbuchKlappe: WoerterbuchAnsicht?
     private var klappeKnopf = NSButton()
+    private var tastenKnopf = NSButton()
     private var klappeOffen = false
     /// Läuft, wenn in der Klappe etwas geändert wurde.
     var beiWoerterbuchAenderung: ((Woerterbuch) -> Void)?
@@ -178,7 +179,15 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
         mitte.distribution = .fill
         mitte.translatesAutoresizingMaskIntoConstraints = false
 
-        let kopfzeileMitKlappe = NSStackView(views: [kopfzeile, NSView(), klappeKnopf])
+        tastenKnopf = Knoepfe.knopf(
+            "Tastenkürzel", symbol: "keyboard",
+            ziel: self, aktion: #selector(zeigeTastenkuerzel),
+            hilfe: "Alle Tasten auf einen Blick (⌘/)"
+        )
+        tastenKnopf.controlSize = .small
+        tastenKnopf.font = .systemFont(ofSize: 11)
+
+        let kopfzeileMitKlappe = NSStackView(views: [kopfzeile, NSView(), tastenKnopf, klappeKnopf])
         kopfzeileMitKlappe.orientation = .horizontal
         kopfzeileMitKlappe.spacing = 8
         kopfzeileMitKlappe.translatesAutoresizingMaskIntoConstraints = false
@@ -931,6 +940,10 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
         klappeOffen ? klappeZu() : klappeAuf()
     }
 
+    @objc func zeigeTastenkuerzel() {
+        Tastenkuerzel.zeige(ueber: window)
+    }
+
     func klappeAuf(dauerhaft: Bool = false) {
         guard !klappeOffen else { return }
         let ansicht = WoerterbuchAnsicht(
@@ -1382,6 +1395,13 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
         beiUebernahme?(analyse, merken)
     }
 
+    /// Im Hauptfenster bleibt der Text nach dem Kopieren stehen — dann muss
+    /// eine Zeile sagen, dass es geklappt hat.
+    func meldeKopiert() {
+        meldung.textColor = .secondaryLabelColor
+        meldung.stringValue = "In die Zwischenablage gelegt. Jetzt im KI-Tool einfügen."
+    }
+
     func abbrechen() {
         beiAbbruch?()
     }
@@ -1431,45 +1451,28 @@ extension SchutzAnsicht: NSTextViewDelegate {
         return true
     }
 
-    /// Verbietet Eingaben in den Decknamen. Der Originaltext links und rechts
-    /// davon bleibt frei — genau das ist gemeint mit „Text bearbeiten, Anzeige
-    /// nicht".
+    /// Der Text lässt sich bearbeiten wie jeder andere: tippen, alles
+    /// markieren, löschen. Nur mitten in einen Decknamen tippen geht nicht.
+    /// Ein Löschen, das einen Chip anschneidet, nimmt gleich den ganzen Chip
+    /// mit — sonst käme der Name beim nächsten Prüfen einfach wieder.
     func textView(
         _ ansicht: NSTextView,
         shouldChangeTextIn bereich: NSRange,
         replacementString ersatz: String?
     ) -> Bool {
         guard ansicht === textAnsicht else { return true }
-        let inhalt = textAnsicht.attributedString()
-
-        if bereich.length > 0 {
-            var beruehrt = false
-            inhalt.enumerateAttribute(Chiptext.istPlatzhalter, in: bereich) { wert, _, weiter in
-                if wert != nil {
-                    beruehrt = true
-                    weiter.pointee = true
-                }
-            }
-            if beruehrt {
-                zeigeMeldung("Den Decknamen im Text kann man nicht ändern. Das Feld unten schon.")
-                return false
-            }
+        switch Chiptext.pruefeAenderung(
+            bereich: bereich, ersatz: ersatz, in: textAnsicht.attributedString(), chips: bereiche
+        ) {
+        case .erlaubt:
             return true
-        }
-
-        // Einfügemarke: nur mitten im Deckname sperren. An seinen Rändern
-        // soll man den Namen davor noch verlängern können.
-        let vorher = bereich.location > 0
-            ? inhalt.attribute(Chiptext.istPlatzhalter, at: bereich.location - 1, effectiveRange: nil) != nil
-            : false
-        let danach = bereich.location < inhalt.length
-            ? inhalt.attribute(Chiptext.istPlatzhalter, at: bereich.location, effectiveRange: nil) != nil
-            : false
-        if vorher && danach {
+        case .verboten:
             zeigeMeldung("Den Decknamen im Text kann man nicht ändern. Das Feld unten schon.")
             return false
+        case .ausweiten(let ganz):
+            Chiptext.loescheSpaeter(ganz, in: textAnsicht)
+            return false
         }
-        return true
     }
 
     /// Jede Eingabe im Text löst nach einer kurzen Pause eine neue Prüfung aus.
