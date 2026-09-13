@@ -46,6 +46,7 @@ enum Selbsttest {
         fehler += pruefeWoerterbuchBeiEnge()
         fehler += pruefeKorrekturImText()
         fehler += pruefeIgnorierenImRueckweg()
+        fehler += pruefeFreiliste()
 
         print("")
         print(fehler == 0 ? "Alles in Ordnung." : "\(fehler) Punkt(e) fehlgeschlagen.")
@@ -1493,6 +1494,79 @@ enum Selbsttest {
             print("✓ Ignorieren: nochmal ⌫ holt sie zurück")
         } else {
             print("✗ Ignorieren: zurückgeholt sind \(ansicht.offeneFuerPruefung()) offen statt 3")
+            fehler += 1
+        }
+        return fehler
+    }
+
+    /// Die Freiliste in den Einstellungen: aufnehmen, entfernen, wirken.
+    private static func pruefeFreiliste() -> Int {
+        var fehler = 0
+        var gemeldet: Woerterbuch?
+        let ansicht = FreilisteAnsicht(woerterbuch: Woerterbuch())
+        ansicht.beimSichern = { gemeldet = $0 }
+        let fenster = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 400),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        fenster.contentView = ansicht
+        fenster.layoutIfNeeded()
+        defer { fenster.orderOut(nil) }
+
+        let anfang = ansicht.zeilenFuerPruefung()
+        if anfang.count == Freiliste.eingebaut.count, anfang.allSatisfy(\.eingebaut) {
+            print("✓ Freiliste: \(anfang.count) eingebaute Wörter stehen da")
+        } else {
+            print("✗ Freiliste: \(anfang.count) Zeilen, erwartet \(Freiliste.eingebaut.count) eingebaute")
+            fehler += 1
+        }
+
+        ansicht.aufnehmenFuerPruefung("Nordlicht")
+        if gemeldet?.istFrei("Nordlicht") == true {
+            print("✓ Freiliste: aufgenommen und nach oben gemeldet")
+        } else {
+            print("✗ Freiliste: nichts gemeldet")
+            fehler += 1
+        }
+
+        // Alphabetisch einsortiert, nicht hinten angehängt.
+        let mitNeuem = ansicht.zeilenFuerPruefung().map(\.wort)
+        if mitNeuem == mitNeuem.sorted(by: { $0.localizedStandardCompare($1) == .orderedAscending }) {
+            print("✓ Freiliste: alphabetisch sortiert")
+        } else {
+            print("✗ Freiliste: Reihenfolge stimmt nicht")
+            fehler += 1
+        }
+
+        // Eingebautes lässt sich nicht entfernen.
+        ansicht.waehleFuerPruefung("August")
+        ansicht.entfernen()
+        if ansicht.woerterbuchFuerPruefung().istFrei("August") {
+            print("✓ Freiliste: August bleibt — \(ansicht.meldungFuerPruefung())")
+        } else {
+            print("✗ Freiliste: August ließ sich entfernen")
+            fehler += 1
+        }
+
+        ansicht.waehleFuerPruefung("Nordlicht")
+        ansicht.entfernen()
+        if ansicht.woerterbuchFuerPruefung().istFrei("Nordlicht") == false {
+            print("✓ Freiliste: eigenes Wort wieder entfernt")
+        } else {
+            print("✗ Freiliste: Nordlicht blieb stehen")
+            fehler += 1
+        }
+
+        // Und die Wirkung auf einen echten Text.
+        var buch = Woerterbuch()
+        buch.gibFrei("Nordlicht")
+        let analyse = Schleuse.analysiere("Sehr geehrter Herr Nordlicht, danke.", woerterbuch: buch)
+        if !analyse.aktiveFunde.contains(where: { $0.text == "Nordlicht" }) {
+            print("✓ Freiliste: der Begriff wird im Text nicht mehr vorgeschlagen")
+        } else {
+            print("✗ Freiliste: der Begriff taucht weiter als Fund auf")
             fehler += 1
         }
         return fehler

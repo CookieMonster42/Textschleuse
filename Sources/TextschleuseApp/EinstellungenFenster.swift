@@ -1,5 +1,6 @@
 import AppKit
 import Carbon.HIToolbox
+import TextschleuseCore
 
 /// Ein Feld, das eine Tastenkombination aufnimmt.
 ///
@@ -147,10 +148,15 @@ final class EinstellungenFenster: NSWindowController {
 
     private let beiKurzbefehlen: () -> Void
     private let beiDarstellung: (Bool) -> Void
+    private let woerterbuch: Woerterbuch
+    private let beimWoerterbuch: (Woerterbuch) -> Void
+    private var freiliste: FreilisteAnsicht?
 
     static func zeige(
         beiKurzbefehlen: @escaping () -> Void,
-        beiDarstellung: @escaping (Bool) -> Void
+        beiDarstellung: @escaping (Bool) -> Void,
+        woerterbuch: Woerterbuch = Woerterbuch(),
+        beimWoerterbuch: @escaping (Woerterbuch) -> Void = { _ in }
     ) {
         if let vorhandenes = offen {
             vorhandenes.window?.makeKeyAndOrderFront(nil)
@@ -159,7 +165,9 @@ final class EinstellungenFenster: NSWindowController {
         }
         let fenster = EinstellungenFenster(
             beiKurzbefehlen: beiKurzbefehlen,
-            beiDarstellung: beiDarstellung
+            beiDarstellung: beiDarstellung,
+            woerterbuch: woerterbuch,
+            beimWoerterbuch: beimWoerterbuch
         )
         offen = fenster
         fenster.showWindow(nil)
@@ -167,12 +175,19 @@ final class EinstellungenFenster: NSWindowController {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    init(beiKurzbefehlen: @escaping () -> Void, beiDarstellung: @escaping (Bool) -> Void) {
+    init(
+        beiKurzbefehlen: @escaping () -> Void,
+        beiDarstellung: @escaping (Bool) -> Void,
+        woerterbuch: Woerterbuch = Woerterbuch(),
+        beimWoerterbuch: @escaping (Woerterbuch) -> Void = { _ in }
+    ) {
         self.beiKurzbefehlen = beiKurzbefehlen
         self.beiDarstellung = beiDarstellung
+        self.woerterbuch = woerterbuch
+        self.beimWoerterbuch = beimWoerterbuch
 
         let fenster = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 560, height: 420),
+            contentRect: NSRect(x: 0, y: 0, width: 560, height: 470),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -249,16 +264,44 @@ final class EinstellungenFenster: NSWindowController {
         stapel.edgeInsets = NSEdgeInsets(top: 20, left: 22, bottom: 20, right: 22)
         stapel.translatesAutoresizingMaskIntoConstraints = false
 
-        let inhalt = NSView()
-        inhalt.addSubview(stapel)
+        let allgemein = NSView()
+        allgemein.addSubview(stapel)
         NSLayoutConstraint.activate([
-            stapel.topAnchor.constraint(equalTo: inhalt.topAnchor),
-            stapel.leadingAnchor.constraint(equalTo: inhalt.leadingAnchor),
-            stapel.trailingAnchor.constraint(equalTo: inhalt.trailingAnchor),
-            stapel.bottomAnchor.constraint(lessThanOrEqualTo: inhalt.bottomAnchor),
+            stapel.topAnchor.constraint(equalTo: allgemein.topAnchor),
+            stapel.leadingAnchor.constraint(equalTo: allgemein.leadingAnchor),
+            stapel.trailingAnchor.constraint(equalTo: allgemein.trailingAnchor),
+            stapel.bottomAnchor.constraint(lessThanOrEqualTo: allgemein.bottomAnchor),
+        ])
+
+        let liste = FreilisteAnsicht(woerterbuch: woerterbuch)
+        liste.beimSichern = { [weak self] geaendert in self?.beimWoerterbuch(geaendert) }
+        freiliste = liste
+
+        let reiter = NSTabView()
+        reiter.translatesAutoresizingMaskIntoConstraints = false
+        for (titel, ansicht) in [
+            ("Allgemein", allgemein),
+            ("Nie ersetzen", liste as NSView),
+        ] {
+            let seite = NSTabViewItem(identifier: titel)
+            seite.label = titel
+            seite.view = ansicht
+            reiter.addTabViewItem(seite)
+        }
+
+        let inhalt = NSView()
+        inhalt.addSubview(reiter)
+        NSLayoutConstraint.activate([
+            reiter.topAnchor.constraint(equalTo: inhalt.topAnchor, constant: 10),
+            reiter.leadingAnchor.constraint(equalTo: inhalt.leadingAnchor, constant: 10),
+            reiter.trailingAnchor.constraint(equalTo: inhalt.trailingAnchor, constant: -10),
+            reiter.bottomAnchor.constraint(equalTo: inhalt.bottomAnchor, constant: -10),
         ])
         window?.contentView = inhalt
     }
+
+    /// Für den Selbsttest.
+    func freilisteFuerPruefung() -> FreilisteAnsicht? { freiliste }
 
     private func ueberschrift(_ text: String) -> NSTextField {
         let feld = NSTextField(labelWithString: text)

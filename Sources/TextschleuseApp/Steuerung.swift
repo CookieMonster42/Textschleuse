@@ -481,6 +481,11 @@ final class Steuerung: NSObject, NSApplicationDelegate {
             beiDarstellung: { [weak self] nurLeiste in
                 NSApp.setActivationPolicy(nurLeiste ? .accessory : .regular)
                 if !nurLeiste { self?.zeigeHauptfenster() }
+            },
+            woerterbuch: woerterbuch,
+            beimWoerterbuch: { [weak self] geaendert in
+                guard self?.sichereWoerterbuch(geaendert) == true else { return }
+                self?.woerterbuch = geaendert
             }
         )
     }

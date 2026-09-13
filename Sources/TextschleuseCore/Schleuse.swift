@@ -46,7 +46,11 @@ public enum Schleuse {
 
         var funde = findeAusWoerterbuch(in: nsText, woerterbuch: arbeitsbuch)
         funde += Regelwerk.finde(in: text)
+        // Die Freiliste bremst nur Vermutungen. Sie greift vor der
+        // Überschneidungsprüfung, damit ein weggefallenes „August" Platz für
+        // den längeren Datumstreffer macht statt ihn zu verdrängen.
         funde += Heuristik.finde(in: text, woerterbuch: arbeitsbuch)
+            .filter { !arbeitsbuch.istFrei($0.text) }
         funde = funde.ohneUeberschneidungen()
 
         var unbekannte: [String: String] = [:]
