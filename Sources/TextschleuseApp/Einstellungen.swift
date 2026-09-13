@@ -30,6 +30,7 @@ final class Einstellungen {
         static let backupErledigt = "backup.aufgefordert"
         static let backupPfad = "backup.pfad"
         static let nurMenueleiste = "darstellung.nurMenueleiste"
+        static let tastenkuerzelBeimStart = "hilfe.tastenkuerzelBeimStart"
     }
 
     private init() {}
@@ -71,6 +72,13 @@ final class Einstellungen {
     var nurMenueleiste: Bool {
         get { speicher.bool(forKey: Schluessel.nurMenueleiste) }
         set { speicher.set(newValue, forKey: Schluessel.nurMenueleiste) }
+    }
+
+    /// Die Tastenkürzel-Übersicht beim Start zeigen. An, bis man sie im
+    /// Blatt abschaltet.
+    var tastenkuerzelBeimStart: Bool {
+        get { speicher.object(forKey: Schluessel.tastenkuerzelBeimStart) as? Bool ?? true }
+        set { speicher.set(newValue, forKey: Schluessel.tastenkuerzelBeimStart) }
     }
 
     var backupPfad: URL? {
