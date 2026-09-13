@@ -1,0 +1,52 @@
+# Textschleuse
+
+Ersetzt Namen, Adressen und Bankdaten durch Platzhalter, bevor ein Text in
+ein KI-Tool geht — und dreht die Antwort wieder zurück. Läuft komplett auf
+dem eigenen Mac, es geht nichts ins Netz.
+
+Aus `Sehr geehrter Herr Nyström, Ihre IBAN DE89 … stimmt.` wird
+`Sehr geehrter Herr PERSON_1, Ihre IBAN IBAN_1 stimmt.` Die Zuordnung liegt
+verschlüsselt im Wörterbuch auf dem Rechner. Kommt die Antwort zurück, werden
+die Platzhalter wieder zu den echten Namen.
+
+## Herunterladen
+
+Die fertige App liegt unter **Releases** rechts auf dieser Seite als
+`Textschleuse-<Version>.dmg`. Voraussetzung: macOS 14 oder neuer auf Apple
+Silicon.
+
+1. DMG öffnen, `Textschleuse.app` auf „Programme" ziehen.
+2. Beim ersten Start: rechte Maustaste auf die App, dann „Öffnen", und im
+   Dialog noch einmal „Öffnen" bestätigen. Das ist nur einmal nötig — die App
+   ist nicht bei Apple notarisiert, deshalb blockiert macOS den Doppelklick.
+3. Die App zeigt ein Fenster und ein Symbol in der Menüleiste. Kurzbefehle:
+   `⌃⌥⌘S` schützt die Zwischenablage, `⌃⌥⌘R` dreht sie zurück.
+
+## Bedienung in Kürze
+
+Text kopieren, `⌃⌥⌘S` drücken. Das Popup zeigt jede Fundstelle: Grün ist
+sicher erkannt (IBAN, E-Mail, Telefon, Wörterbuch), Rot ist eine Vermutung.
+Mit `1`–`5` wird eine markierte Stelle als Person, Firma, Ort, Nummer oder
+Sonstiges geschützt; zugeschaltete Erkennungen wie Website oder Aktenzeichen
+bekommen die Ziffern dahinter. `⌘⏎` legt den geschützten Text in die
+Zwischenablage.
+
+Die Antwort des KI-Tools kopieren, `⌃⌥⌘R` drücken, einfügen.
+
+## Selbst bauen
+
+Es braucht nur die Command Line Tools, kein Xcode.
+
+```bash
+./bauen.sh            # baut .build/Textschleuse.app, mit Prüfungen
+./bauen.sh --install  # legt die App zusätzlich in ~/Applications ab
+./bauen.sh --dmg      # baut das DMG zum Weitergeben
+```
+
+Prüfen, ob auf einem Rechner alles läuft:
+
+```bash
+/Applications/Textschleuse.app/Contents/MacOS/Textschleuse --selbsttest
+```
+
+Die Spezifikation steht in [SPEC.md](SPEC.md).
