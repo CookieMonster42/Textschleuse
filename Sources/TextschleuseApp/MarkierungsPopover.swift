@@ -14,14 +14,23 @@ final class MarkierungsPopover: NSViewController {
     }
 
     private let begriff: String
+    /// Die Kategorien in der Reihenfolge der Ziffern — dieselben wie in der
+    /// Leiste unten, samt zugeschalteten Erkennungen.
+    private let kategorien: [Kategorie]
     private let kannZuordnen: Bool
     private let entscheidung: (Entscheidung) -> Void
     private let merkenHaken = NSButton(checkboxWithTitle: "dauerhaft merken", target: nil, action: nil)
 
     private let popover = NSPopover()
 
-    init(begriff: String, kannZuordnen: Bool, entscheidung: @escaping (Entscheidung) -> Void) {
+    init(
+        begriff: String,
+        kategorien: [Kategorie],
+        kannZuordnen: Bool,
+        entscheidung: @escaping (Entscheidung) -> Void
+    ) {
         self.begriff = begriff
+        self.kategorien = kategorien
         self.kannZuordnen = kannZuordnen
         self.entscheidung = entscheidung
         super.init(nibName: nil, bundle: nil)
@@ -35,30 +44,36 @@ final class MarkierungsPopover: NSViewController {
         kopf.font = .systemFont(ofSize: 12, weight: .semibold)
         kopf.lineBreakMode = .byTruncatingMiddle
 
-        let reihe = NSStackView()
-        reihe.orientation = .horizontal
-        reihe.spacing = 4
-        for (index, kategorie) in Kategorie.schnellwahl.enumerated() {
-            let knopf = NSButton(
-                title: "\(kategorie.anzeigename)  \(index + 1)",
-                target: self,
-                action: #selector(kategorieGewaehlt(_:))
+        // Umbrechend: mit allen zugeschalteten Erkennungen sind es zehn
+        // Knöpfe, und die passen nicht in eine Zeile neben dem Text.
+        let reihe = Fliessleiste()
+        reihe.translatesAutoresizingMaskIntoConstraints = false
+        reihe.setze(kategorien.enumerated().map { platz, kategorie in
+            let taste = Kategorie.taste(fuerPlatz: platz)
+            let knopf = Knoepfe.knopf(
+                kategorie.anzeigename,
+                symbol: Knoepfe.tastenkappe(taste),
+                ziel: self,
+                aktion: #selector(kategorieGewaehlt(_:)),
+                hilfe: taste.map { "Taste \($0)" } ?? "Als \(kategorie.anzeigename) schützen"
             )
-            knopf.tag = index
-            knopf.bezelStyle = .rounded
-            knopf.controlSize = .regular
+            knopf.tag = platz
             // Die Ziffer wirkt auch, während dieses Feld vorn ist.
-            knopf.keyEquivalent = "\(index + 1)"
-            knopf.keyEquivalentModifierMask = []
-            reihe.addArrangedSubview(knopf)
-        }
+            if let taste {
+                knopf.keyEquivalent = taste
+                knopf.keyEquivalentModifierMask = []
+            }
+            return knopf
+        })
+        let breite: CGFloat = 500
+        reihe.widthAnchor.constraint(equalToConstant: breite).isActive = true
+        reihe.bemesse(breite: breite)
 
-        let zuordnen = NSButton(
-            title: "Gehört zu einem bekannten Eintrag …  D",
-            target: self,
-            action: #selector(zuordnenGewaehlt)
+        let zuordnen = Knoepfe.knopf(
+            "Gehört zu einem bekannten Eintrag …", symbol: "d.square",
+            ziel: self, aktion: #selector(zuordnenGewaehlt),
+            hilfe: "Taste D"
         )
-        zuordnen.bezelStyle = .rounded
         zuordnen.keyEquivalent = "d"
         zuordnen.keyEquivalentModifierMask = []
         zuordnen.isEnabled = kannZuordnen
@@ -108,10 +123,10 @@ final class MarkierungsPopover: NSViewController {
     // MARK: Aktionen
 
     @objc private func kategorieGewaehlt(_ absender: NSButton) {
-        guard Kategorie.schnellwahl.indices.contains(absender.tag) else { return }
+        guard kategorien.indices.contains(absender.tag) else { return }
         let merken = merkenHaken.state == .on
         schliesse()
-        entscheidung(.kategorie(Kategorie.schnellwahl[absender.tag], merken: merken))
+        entscheidung(.kategorie(kategorien[absender.tag], merken: merken))
     }
 
     @objc private func zuordnenGewaehlt() {

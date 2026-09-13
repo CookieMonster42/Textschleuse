@@ -100,3 +100,32 @@ public enum Sicherheit: String, Codable, Sendable {
     /// dann als `UNBEKANNT_n`.
     case vermutung
 }
+
+public extension Kategorie {
+
+    /// Was im Popup zur Wahl steht: die fünf festen Typen, dahinter die
+    /// Kategorien der zugeschalteten Erkennungen.
+    ///
+    /// Wer „Anschrift" angeschaltet hat, will eine übersehene Adresse auch von
+    /// Hand als ANSCHRIFT markieren können — nicht als „Sonstiges".
+    static func zurWahl(mit woerterbuch: Woerterbuch) -> [Kategorie] {
+        var reihe = schnellwahl
+        for regel in woerterbuch.zusatzregeln where !reihe.contains(regel.kategorie) {
+            reihe.append(regel.kategorie)
+        }
+        return reihe
+    }
+
+    /// Die Taste für den n-ten Platz in dieser Reihe: 1 bis 9, dann 0. Mehr
+    /// als zehn Plätze gibt es nicht.
+    static func taste(fuerPlatz platz: Int) -> String? {
+        guard platz >= 0, platz < 10 else { return nil }
+        return platz == 9 ? "0" : String(platz + 1)
+    }
+
+    /// Der Weg zurück: welcher Platz gehört zu dieser Ziffer?
+    static func platz(fuerTaste taste: String) -> Int? {
+        guard taste.count == 1, let ziffer = Int(taste) else { return nil }
+        return ziffer == 0 ? 9 : ziffer - 1
+    }
+}

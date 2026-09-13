@@ -47,6 +47,8 @@ enum Selbsttest {
         fehler += pruefeKorrekturImText()
         fehler += pruefeIgnorierenImRueckweg()
         fehler += pruefeFreiliste()
+        fehler += pruefeZusatzKategorien()
+        fehler += pruefeChipOhnePolster()
 
         print("")
         print(fehler == 0 ? "Alles in Ordnung." : "\(fehler) Punkt(e) fehlgeschlagen.")
@@ -1952,6 +1954,94 @@ enum Selbsttest {
             if let treffer = woerterbuchSuchen(in: unter) { return treffer }
         }
         return nil
+    }
+
+    /// Eine zugeschaltete Erkennung muss auch unten als Knopf stehen und auf
+    /// ihrer Ziffer liegen — sonst ließe sich eine übersehene Website nur als
+    /// „Sonstiges" nachtragen.
+    private static func pruefeZusatzKategorien() -> Int {
+        var fehler = 0
+        var buch = Woerterbuch()
+        buch.schalte(.website, an: true)
+
+        let text = "Alles Weitere steht auf unserer Seite Nordlicht."
+        let ansicht = SchutzAnsicht(analyse: Schleuse.analysiere(text, woerterbuch: buch))
+        let fenster = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1000, height: 640),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        fenster.contentView = ansicht
+        fenster.makeKeyAndOrderFront(nil)
+        fenster.layoutIfNeeded()
+        defer { fenster.orderOut(nil) }
+
+        let titel = knoepfeSammeln(in: ansicht).map(\.title)
+        if titel.contains("Website") {
+            print("✓ Zusatzkategorien: „Website\" steht als Knopf in der Leiste")
+        } else {
+            print("✗ Zusatzkategorien: kein Knopf „Website\" in der Leiste (\(titel.joined(separator: ", ")))")
+            fehler += 1
+        }
+        if !titel.contains("Anschrift") {
+            print("✓ Zusatzkategorien: „Anschrift\" ist aus und fehlt in der Leiste")
+        } else {
+            print("✗ Zusatzkategorien: „Anschrift\" steht da, obwohl es aus ist")
+            fehler += 1
+        }
+
+        ansicht.fokussiereTextFuerPruefung()
+        ansicht.markiereFuerPruefung((text as NSString).range(of: "Nordlicht"))
+        let abgefangen = ansicht.tasteFuerPruefung("6")
+        let angelegt = ansicht.analyse.woerterbuch.eintrag(fuerText: "Nordlicht")
+        if abgefangen, angelegt?.kategorie == .website {
+            print("✓ Zusatzkategorien: Taste 6 legt die Markierung als Website an")
+        } else {
+            print("✗ Zusatzkategorien: Taste 6 tut nichts "
+                + "(abgefangen: \(abgefangen), Eintrag: \(angelegt?.kategorie.anzeigename ?? "keiner"))")
+            fehler += 1
+        }
+
+        // Ohne zugeschaltete Erkennung bleibt die 6 eine Ziffer.
+        let ohne = SchutzAnsicht(analyse: Schleuse.analysiere(text, woerterbuch: Woerterbuch()))
+        fenster.contentView = ohne
+        fenster.layoutIfNeeded()
+        ohne.fokussiereTextFuerPruefung()
+        ohne.markiereFuerPruefung((text as NSString).range(of: "Nordlicht"))
+        if ohne.tasteFuerPruefung("6") == false {
+            print("✓ Zusatzkategorien: ohne Website-Erkennung ist die 6 keine Kategorie")
+        } else {
+            print("✗ Zusatzkategorien: die 6 wird abgefangen, obwohl nichts zugeschaltet ist")
+            fehler += 1
+        }
+        return fehler
+    }
+
+    /// Der Chip endet mit dem Decknamen. Kein Polster dahinter — sonst sieht
+    /// man nicht, ob im Text nach dem Namen ein Leerzeichen kommt oder gleich
+    /// das Komma.
+    private static func pruefeChipOhnePolster() -> Int {
+        let text = "Sehr geehrter Herr Nyström,anbei die Unterlagen."
+        let analyse = Schleuse.analysiere(text, woerterbuch: Woerterbuch())
+        let aufbau = Chiptext.aufbauen(analyse: analyse, ausgewaehlt: nil)
+        guard let fund = analyse.funde.first(where: { $0.text.contains("Nyström") }),
+              let bereich = aufbau.bereiche[fund.id]
+        else {
+            print("✗ Chip: Nyström nicht gefunden")
+            return 1
+        }
+        let anzeige = aufbau.text.string as NSString
+        let chip = anzeige.substring(with: bereich)
+        let danach = NSMaxRange(bereich) < anzeige.length
+            ? anzeige.substring(with: NSRange(location: NSMaxRange(bereich), length: 1))
+            : ""
+        if chip.hasPrefix("Nyström"), chip.hasSuffix(fund.platzhalter), danach == "," {
+            print("✓ Chip: „\(chip)\" endet mit dem Decknamen, das Komma folgt direkt")
+            return 0
+        }
+        print("✗ Chip: „\(chip)\" — danach kommt „\(danach)\" statt des Kommas")
+        return 1
     }
 
     private static func knoepfeSammeln(in ansicht: NSView) -> [NSButton] {
