@@ -186,22 +186,24 @@ enum Chiptext {
             attribute[.underlineColor] = farbe
         }
 
-        // Drei Stücke: der Originaltext in der Mitte, links und rechts die
-        // Zutat der App. Nur das Mittelstück trägt die Quellspur, nur es
-        // lässt sich bearbeiten.
+        // Zwei Stücke: vorn der Originaltext, dahinter die Zutat der App. Nur
+        // das vordere trägt die Quellspur, nur es lässt sich bearbeiten.
+        //
+        // Kein Leerzeichen als Polster links und rechts. Das sah gefälliger
+        // aus, hat aber verdeckt, was im Text steht: ob nach dem Namen ein
+        // Leerzeichen kommt oder gleich das Komma, war nicht zu sehen. Jetzt
+        // endet der Chip mit dem Decknamen, und was folgt, ist Originaltext.
         var dekoration = attribute
         dekoration[istPlatzhalter] = true
         dekoration[.foregroundColor] = NSColor.secondaryLabelColor
         dekoration.removeValue(forKey: quellbereich)
 
-        let text = NSMutableAttributedString(string: " ", attributes: dekoration)
-        text.append(NSAttributedString(string: fund.text, attributes: attribute))
+        let text = NSMutableAttributedString(string: fund.text, attributes: attribute)
 
         var decknameAttribute = dekoration
         decknameAttribute[.foregroundColor] = farbe.blended(withFraction: 0.35, of: .labelColor) ?? farbe
         text.append(NSAttributedString(string: " → ", attributes: dekoration))
         text.append(NSAttributedString(string: fund.platzhalter, attributes: decknameAttribute))
-        text.append(NSAttributedString(string: " ", attributes: dekoration))
         return text
     }
 
