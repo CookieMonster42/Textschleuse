@@ -10,7 +10,7 @@ cd "$(dirname "$0")"
 KONFIGURATION=release
 BUNDLE=".build/Textschleuse.app"
 BUNDLE_ID="de.risiq.textschleuse"
-VERSION="0.3"
+VERSION="0.4"
 
 echo "→ Prüfungen"
 swift run --configuration "$KONFIGURATION" Pruefungen
