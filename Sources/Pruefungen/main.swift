@@ -428,19 +428,22 @@ Pruefstand.pruefe("Speicher: Klartext-Export und -Import") {
     }
 }
 
-Pruefstand.pruefe("Wörterbuch: gelöschte Kennungen werden nicht neu vergeben") {
-    // Mit Zufall statt Zähler: genau das ist der Grund, warum eine
-    // gelöschte Kennung nie wieder auftaucht.
-    Decknamen.zufallFuerAlle()
+Pruefstand.pruefe("Wörterbuch: Kennungen hängen am Namen, nicht an der Reihenfolge") {
+    // Mit der Ableitung statt des Zählers: ein anderer Name bekommt eine
+    // andere Kennung, derselbe Name nach dem Löschen wieder dieselbe.
+    Decknamen.ableitenFuerAlle()
     defer { Decknamen.zaehleFuerPruefungen() }
 
     var buch = Woerterbuch()
     let erster = buch.anlegen(text: "Anna Beispiel", kategorie: .person)
-    Pruefstand.wahr(Decknamen.istZufallskennung(erster.kennung), "erste Person mit Zufallskennung")
+    Pruefstand.wahr(Decknamen.istZufallskennung(erster.kennung), "erste Person mit abgeleiteter Kennung")
 
     buch.loeschen(erster.id)
     let zweiter = buch.anlegen(text: "Bernd Beispiel", kategorie: .person)
-    Pruefstand.falsch(zweiter.platzhalter == erster.platzhalter, "die alte Kennung bleibt verbrannt")
+    Pruefstand.falsch(zweiter.platzhalter == erster.platzhalter, "ein anderer Name, eine andere Kennung")
+
+    let wieder = buch.anlegen(text: "Anna Beispiel", kategorie: .person)
+    Pruefstand.gleich(wieder.platzhalter, erster.platzhalter, "derselbe Name bekommt seine Kennung zurück")
 }
 
 // MARK: Decknamen
@@ -1764,7 +1767,7 @@ Pruefstand.pruefe("Speicher: räumt alte Sicherungen weg") {
 // MARK: Zufallskennungen
 
 Pruefstand.pruefe("Zufallskennung: achtzehn Stellen, nichts abzulesen") {
-    Decknamen.zufallFuerAlle()
+    Decknamen.ableitenFuerAlle()
     defer { Decknamen.zaehleFuerPruefungen() }
 
     var buch = Woerterbuch()
@@ -1778,8 +1781,8 @@ Pruefstand.pruefe("Zufallskennung: achtzehn Stellen, nichts abzulesen") {
     Pruefstand.gleich(erster.nummer, 0, "keine laufende Nummer mehr")
 
     var gesehen = Set<String>()
-    for _ in 0..<500 { gesehen.insert(Decknamen.zufallskennung()) }
-    Pruefstand.gleich(gesehen.count, 500, "fünfhundert Kennungen, keine doppelt")
+    for nummer in 0..<500 { gesehen.insert(Decknamen.ableiten(text: "Name \(nummer)", seed: buch.seed)) }
+    Pruefstand.gleich(gesehen.count, 500, "fünfhundert Namen, fünfhundert Kennungen")
 
     // Der Rückweg findet die Kennung, auch wenn ein Modell ein Leerzeichen
     // statt des Unterstrichs schreibt.
@@ -1797,6 +1800,64 @@ Pruefstand.pruefe("Zufallskennung: achtzehn Stellen, nichts abzulesen") {
     Pruefstand.wahr(unbekannt.hasPrefix("UNBEKANNT_"), "Unbekannt mit Kürzel")
     Pruefstand.wahr(Decknamen.istZufallskennung(String(unbekannt.dropFirst("UNBEKANNT_".count))),
                     "Unbekannt mit Zufallskennung")
+}
+
+Pruefstand.pruefe("Seed: gleicher Seed, gleicher Name, gleicher Deckname") {
+    Decknamen.ableitenFuerAlle()
+    defer { Decknamen.zaehleFuerPruefungen() }
+
+    let seed = Decknamen.neuerSeed()
+    Pruefstand.gleich(seed.count, 32, "ein Seed hat 32 Stellen")
+
+    // Zwei Rechner, ein Seed.
+    var hier = Woerterbuch(seed: seed)
+    var dort = Woerterbuch(seed: seed)
+    let meiner = hier.anlegen(text: "Thorben Nyström", kategorie: .person)
+    let seiner = dort.anlegen(text: "thorben   nyström", kategorie: .person)
+    Pruefstand.gleich(meiner.platzhalter, seiner.platzhalter,
+                      "derselbe Name ergibt auf beiden Rechnern denselben Decknamen, Schreibweise egal")
+
+    // Ein Text von dort dreht sich hier zurück — ohne dass je ein Wörterbuch
+    // ausgetauscht wurde.
+    let vonDort = "Bitte \(seiner.platzhalter) anrufen."
+    Pruefstand.gleich(Rueckweg.analysiere(vonDort, woerterbuch: hier).ergebnis,
+                      "Bitte Thorben Nyström anrufen.", "Rückweg mit dem eigenen Wörterbuch")
+
+    // Ein anderer Seed: nichts zu erkennen.
+    var fremd = Woerterbuch(seed: Decknamen.neuerSeed())
+    let fremder = fremd.anlegen(text: "Thorben Nyström", kategorie: .person)
+    Pruefstand.falsch(fremder.platzhalter == meiner.platzhalter, "anderer Seed, anderer Deckname")
+
+    // UNBEKANNT aus einem alten Text geht auf, sobald der Name gemerkt ist.
+    let alt = Schleuse.analysiere("Herr Zwickel ruft an.", woerterbuch: hier)
+    let unbekannt = alt.ungeprueft.first?.platzhalter ?? ""
+    Pruefstand.wahr(unbekannt.hasPrefix("UNBEKANNT_"), "erst eine Vermutung")
+    Pruefstand.gleich(Rueckweg.analysiere("Frage \(unbekannt).", woerterbuch: hier).offen.count, 1,
+                      "ohne Eintrag bleibt sie offen")
+    _ = hier.anlegen(text: "Zwickel", kategorie: .person)
+    Pruefstand.gleich(Rueckweg.analysiere("Frage \(unbekannt).", woerterbuch: hier).ergebnis,
+                      "Frage Zwickel.", "mit Eintrag löst der alte UNBEKANNT-Platzhalter auf")
+
+    // Seed wechseln und neu ableiten: neue Decknamen, alte bleiben auflösbar.
+    let vorher = meiner.platzhalter
+    hier.seed = Decknamen.neuerSeed()
+    let geaendert = hier.leiteAlleNeuAb()
+    Pruefstand.gleich(geaendert, 2, "beide Einträge neu abgeleitet")
+    let nachher = hier.eintrag(mitId: meiner.id)?.platzhalter ?? ""
+    Pruefstand.falsch(nachher == vorher, "neuer Deckname nach dem Seed-Wechsel")
+    Pruefstand.gleich(hier.klartext(fuerPlatzhalter: vorher), "Thorben Nyström", "der alte geht weiter auf")
+    Pruefstand.gleich(nachher, "PERSON_" + Decknamen.ableiten(text: "Thorben Nyström", seed: hier.seed),
+                      "und der neue ist die Ableitung aus dem neuen Seed")
+
+    // Der Seed übersteht Speichern und Laden.
+    let daten = try! JSONEncoder().encode(hier)
+    let geladen = try! JSONDecoder().decode(Woerterbuch.self, from: daten)
+    Pruefstand.gleich(geladen.seed, hier.seed, "Seed in der Datei")
+    Pruefstand.falsch(geladen.seedWarNeu, "kein frischer Seed nötig")
+
+    // Eine Datei von vor dem Seed bekommt einen — und sagt das.
+    let ohne = try! JSONDecoder().decode(Woerterbuch.self, from: Data("{\"version\":1,\"eintraege\":[]}".utf8))
+    Pruefstand.wahr(ohne.seedWarNeu && ohne.seed.count == 32, "alte Datei: frischer Seed, zum Sichern vorgemerkt")
 }
 
 Pruefstand.pruefe("Zufallskennung: Prosa ist kein Platzhalter") {

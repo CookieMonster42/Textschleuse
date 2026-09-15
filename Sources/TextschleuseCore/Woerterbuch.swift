@@ -61,7 +61,8 @@ public struct Eintrag: Codable, Identifiable, Hashable, Sendable {
         self.nummer = nummer
         // Eine Nummer ohne Kennung ist der alte Weg: dann heißt der Eintrag
         // weiter `PERSON_7`.
-        self.kennung = kennung ?? (nummer > 0 ? String(nummer) : Decknamen.kennung(fuer: kategorie))
+        self.kennung = kennung
+            ?? (nummer > 0 ? String(nummer) : Decknamen.kennung(fuer: text, kategorie: kategorie, seed: ""))
         self.aliase = aliase
         self.automatischErkannt = automatischErkannt
         self.angelegt = angelegt
@@ -163,19 +164,32 @@ public struct Woerterbuch: Codable, Sendable {
     public var eigeneFreieWoerter: [String]
     /// Kennungen der zugeschalteten Erkennungen, siehe `Zusatzregel`.
     public var aktiveZusatzregeln: [String]
+    /// Das Geheimnis, aus dem die Decknamen abgeleitet werden. Siehe
+    /// `Decknamen`. Wer denselben Seed hat, bekommt dieselben Decknamen.
+    public var seed: String
+    /// Gesetzt, wenn die Datei noch keinen Seed hatte und beim Laden einer
+    /// erzeugt wurde — dann gehört sie gleich gesichert, sonst wäre er beim
+    /// nächsten Start ein anderer.
+    public var seedWarNeu = false
+
+    enum CodingKeys: String, CodingKey {
+        case version, eintraege, naechsteNummern, eigeneFreieWoerter, aktiveZusatzregeln, seed
+    }
 
     public init(
         version: Int = Woerterbuch.aktuelleVersion,
         eintraege: [Eintrag] = [],
         naechsteNummern: [String: Int] = [:],
         eigeneFreieWoerter: [String] = [],
-        aktiveZusatzregeln: [String] = []
+        aktiveZusatzregeln: [String] = [],
+        seed: String = Decknamen.neuerSeed()
     ) {
         self.version = version
         self.eintraege = eintraege
         self.naechsteNummern = naechsteNummern
         self.eigeneFreieWoerter = eigeneFreieWoerter
         self.aktiveZusatzregeln = aktiveZusatzregeln
+        self.seed = seed
     }
 
     /// Von Hand geschrieben: `eigeneFreieWoerter` fehlt in älteren Dateien,
@@ -196,6 +210,9 @@ public struct Woerterbuch: Codable, Sendable {
             [String].self,
             forKey: .aktiveZusatzregeln
         ) ?? []
+        let gelesen = try behaelter.decodeIfPresent(String.self, forKey: .seed) ?? ""
+        seed = gelesen.isEmpty ? Decknamen.neuerSeed() : gelesen
+        seedWarNeu = gelesen.isEmpty
     }
 
     // MARK: Zugeschaltete Erkennungen
@@ -255,23 +272,40 @@ public struct Woerterbuch: Codable, Sendable {
         let eintrag = Eintrag(
             text: text,
             kategorie: kategorie,
-            kennung: freieKennung(fuer: kategorie),
+            kennung: freieKennung(fuer: text, kategorie: kategorie),
             automatischErkannt: automatischErkannt
         )
         eintraege.append(eintrag)
         return eintrag
     }
 
-    /// Eine Kennung, deren Deckname noch nirgends im Wörterbuch vorkommt.
-    /// Bei Zufall ist das praktisch immer die erste; der Zähler der
-    /// Prüfungen springt über belegte Nummern.
-    func freieKennung(fuer kategorie: Kategorie) -> String {
-        let belegt = alleDecknamen
-        var kennung: String
-        repeat {
-            kennung = Decknamen.kennung(fuer: kategorie, belegt: belegt)
-        } while belegt.contains("\(kategorie.praefix)_\(kennung)")
-        return kennung
+    /// Die Kennung für einen Wortlaut: aus dem Seed abgeleitet, und nur
+    /// dann eine andere, wenn der Deckname zufällig schon vergeben ist.
+    func freieKennung(fuer text: String, kategorie: Kategorie) -> String {
+        Decknamen.kennung(fuer: text, kategorie: kategorie, seed: seed, belegt: alleDecknamen)
+    }
+
+    /// Leitet jeden Deckname neu aus dem Seed ab — nach einem Seed-Wechsel,
+    /// damit zwei Wörterbücher mit demselben Seed dieselben Decknamen
+    /// tragen. Die alten Namen bleiben als frühere auflösbar. Selbst
+    /// vergebene Decknamen bleiben unangetastet. Liefert, wie viele
+    /// Einträge sich geändert haben.
+    @discardableResult
+    public mutating func leiteAlleNeuAb() -> Int {
+        var geaendert = 0
+        for index in eintraege.indices {
+            let bisher = eintraege[index].platzhalter
+            let neue = Decknamen.ableiten(text: eintraege[index].text, seed: seed)
+            guard eintraege[index].kennung != neue else { continue }
+            eintraege[index].kennung = neue
+            eintraege[index].nummer = 0
+            if eintraege[index].platzhalter != bisher,
+               !eintraege[index].fruehereDecknamen.contains(bisher) {
+                eintraege[index].fruehereDecknamen.append(bisher)
+            }
+            geaendert += 1
+        }
+        return geaendert
     }
 
     /// Hängt eine weitere Schreibweise an einen bestehenden Eintrag.
@@ -321,9 +355,10 @@ public struct Woerterbuch: Codable, Sendable {
         else { return }
 
         let bisher = eintraege[index].platzhalter
-        // Eine frische Kennung: eine alte Nummer könnte in der neuen
-        // Kategorie schon vergeben sein.
-        let kennung = freieKennung(fuer: kategorie)
+        // Neu abgeleitet: bei einem alten Eintrag könnte die Nummer in der
+        // neuen Kategorie schon vergeben sein. Ein abgeleiteter bleibt bei
+        // seiner Kennung, nur das Kürzel wechselt.
+        let kennung = freieKennung(fuer: eintraege[index].text, kategorie: kategorie)
 
         eintraege[index].kategorie = kategorie
         eintraege[index].nummer = 0
@@ -433,7 +468,18 @@ public struct Woerterbuch: Codable, Sendable {
                 }
             }
         }
-        return nil
+        return eintrag(fuerUnbekannt: gesucht)?.text
+    }
+
+    /// `UNBEKANNT_<Kennung>` aus einem älteren Text: die Kennung ist aus dem
+    /// Wortlaut abgeleitet, dieselbe wie beim späteren Eintrag. Steht der
+    /// Name inzwischen im Wörterbuch, geht der alte Platzhalter damit auf.
+    func eintrag(fuerUnbekannt gesucht: String) -> Eintrag? {
+        let vorsatz = Kategorie.unbekannt.praefix + "_"
+        guard gesucht.hasPrefix(vorsatz) else { return nil }
+        let kennung = String(gesucht.dropFirst(vorsatz.count))
+        guard Decknamen.istZufallskennung(kennung) else { return nil }
+        return eintraege.first { $0.kennung == kennung }
     }
 
     /// Alle Decknamen, die irgendwo im Wörterbuch vergeben sind. Grundlage für

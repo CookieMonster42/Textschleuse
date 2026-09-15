@@ -2113,6 +2113,38 @@ enum Selbsttest {
                 fehler += 1
             }
         }
+
+        // Der Seed steht im Fenster, und ein eingefügter Seed kommt oben an.
+        let buch = Woerterbuch()
+        var gesichert: Woerterbuch?
+        let einstellungen = EinstellungenFenster(
+            beiKurzbefehlen: {},
+            beiDarstellung: { _ in },
+            woerterbuch: buch,
+            beimWoerterbuch: { gesichert = $0 }
+        )
+        einstellungen.window?.layoutIfNeeded()
+        defer { einstellungen.close() }
+        if einstellungen.seedFeldFuerPruefung().stringValue == buch.seed {
+            print("✓ Einstellungen: der Seed steht im Fenster")
+        } else {
+            print("✗ Einstellungen: im Seed-Feld steht „\(einstellungen.seedFeldFuerPruefung().stringValue)\"")
+            fehler += 1
+        }
+        einstellungen.setzeSeedFuerPruefung("  GEMEINSAMER-SEED-VON-DRUEBEN  ")
+        if gesichert?.seed == "GEMEINSAMER-SEED-VON-DRUEBEN" {
+            print("✓ Einstellungen: ein eingefügter Seed wird gesichert")
+        } else {
+            print("✗ Einstellungen: der Seed kam nicht an (\(gesichert?.seed ?? "nichts"))")
+            fehler += 1
+        }
+        einstellungen.setzeSeedFuerPruefung("")
+        if gesichert?.seed == "GEMEINSAMER-SEED-VON-DRUEBEN" {
+            print("✓ Einstellungen: ein leerer Seed wird abgelehnt")
+        } else {
+            print("✗ Einstellungen: ein leerer Seed ging durch")
+            fehler += 1
+        }
         return fehler
     }
 
