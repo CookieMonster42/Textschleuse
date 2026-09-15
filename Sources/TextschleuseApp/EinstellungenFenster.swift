@@ -148,9 +148,11 @@ final class EinstellungenFenster: NSWindowController {
 
     private let beiKurzbefehlen: () -> Void
     private let beiDarstellung: (Bool) -> Void
-    private let woerterbuch: Woerterbuch
+    private var woerterbuch: Woerterbuch
     private let beimWoerterbuch: (Woerterbuch) -> Void
     private var freiliste: FreilisteAnsicht?
+    private let seedFeld = NSTextField()
+    private let seedMeldung = NSTextField(labelWithString: "")
 
     static func zeige(
         beiKurzbefehlen: @escaping () -> Void,
@@ -187,7 +189,7 @@ final class EinstellungenFenster: NSWindowController {
         self.beimWoerterbuch = beimWoerterbuch
 
         let fenster = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 560, height: 470),
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 640),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -241,6 +243,31 @@ final class EinstellungenFenster: NSWindowController {
         )
         nurLeiste.state = einstellungen.nurMenueleiste ? .on : .off
 
+        // Der Seed: aus ihm und dem Namen entsteht der Deckname.
+        seedFeld.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        seedFeld.stringValue = woerterbuch.seed
+        seedFeld.target = self
+        seedFeld.action = #selector(seedUebernehmen)
+        seedFeld.toolTip = "Einen Seed von einem anderen Rechner hier einfügen und ⏎ drücken."
+        seedFeld.widthAnchor.constraint(equalToConstant: 300).isActive = true
+        let kopieren = NSButton(title: "Kopieren", target: self, action: #selector(seedKopieren))
+        kopieren.bezelStyle = .rounded
+        let neu = NSButton(title: "Neu erzeugen", target: self, action: #selector(seedNeu))
+        neu.bezelStyle = .rounded
+        let seedZeile = NSStackView(views: [seedFeld, kopieren, neu])
+        seedZeile.orientation = .horizontal
+        seedZeile.spacing = 8
+        let ableiten = NSButton(
+            title: "Alle Decknamen aus dem Seed neu ableiten …",
+            target: self,
+            action: #selector(alleNeuAbleiten)
+        )
+        ableiten.bezelStyle = .rounded
+        ableiten.toolTip = "Nach einem Seed-Wechsel: jeder Eintrag bekommt den Deckname, "
+            + "der zum Seed passt. Die alten bleiben auflösbar."
+        seedMeldung.font = .systemFont(ofSize: 11)
+        seedMeldung.textColor = .secondaryLabelColor
+
         let stapel = NSStackView(views: [
             ueberschrift("Kurzbefehle"),
             beschriftet("Text schützen", schuetzenFeld),
@@ -250,6 +277,14 @@ final class EinstellungenFenster: NSWindowController {
             trenner(),
             ueberschrift("Popup"),
             beschriftet("Geht auf", position),
+            trenner(),
+            ueberschrift("Seed für die Decknamen"),
+            beschriftet("Seed", seedZeile),
+            beschriftet("", ableiten),
+            beschriftet("", seedMeldung),
+            hinweisZeile("Aus dem Seed und dem Namen entsteht der Deckname. Wer denselben Seed hat, "
+                + "bekommt für denselben Namen denselben Deckname und kann deine Texte zurückdrehen, "
+                + "sobald der Name in seinem Wörterbuch steht. Behandle den Seed wie ein Passwort."),
             trenner(),
             ueberschrift("Verhalten"),
             hinweise,
@@ -274,7 +309,10 @@ final class EinstellungenFenster: NSWindowController {
         ])
 
         let liste = FreilisteAnsicht(woerterbuch: woerterbuch)
-        liste.beimSichern = { [weak self] geaendert in self?.beimWoerterbuch(geaendert) }
+        liste.beimSichern = { [weak self] geaendert in
+            self?.woerterbuch = geaendert
+            self?.beimWoerterbuch(geaendert)
+        }
         freiliste = liste
 
         let reiter = NSTabView()
@@ -302,6 +340,69 @@ final class EinstellungenFenster: NSWindowController {
 
     /// Für den Selbsttest.
     func freilisteFuerPruefung() -> FreilisteAnsicht? { freiliste }
+    func seedFeldFuerPruefung() -> NSTextField { seedFeld }
+    func setzeSeedFuerPruefung(_ seed: String) {
+        seedFeld.stringValue = seed
+        seedUebernehmen()
+    }
+
+    // MARK: Seed
+
+    /// Nimmt das ins Wörterbuch, was im Feld steht — sobald ⏎ gedrückt oder
+    /// das Feld verlassen wird.
+    @objc private func seedUebernehmen() {
+        let neu = seedFeld.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !neu.isEmpty else {
+            seedFeld.stringValue = woerterbuch.seed
+            melde("Ein leerer Seed geht nicht. Der bisherige bleibt.")
+            return
+        }
+        guard neu != woerterbuch.seed else { return }
+        woerterbuch.seed = neu
+        seedFeld.stringValue = neu
+        freiliste?.setze(woerterbuch: woerterbuch)
+        beimWoerterbuch(woerterbuch)
+        melde("Neuer Seed übernommen. Er gilt für alle Decknamen, die ab jetzt entstehen — "
+            + "die bestehenden bleiben, bis du sie neu ableitest.")
+    }
+
+    @objc private func seedKopieren() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(woerterbuch.seed, forType: .string)
+        melde("Seed in der Zwischenablage. Auf dem anderen Rechner hier einfügen und ⏎ drücken.")
+    }
+
+    @objc private func seedNeu() {
+        seedFeld.stringValue = Decknamen.neuerSeed()
+        seedUebernehmen()
+    }
+
+    @objc private func alleNeuAbleiten() {
+        let anzahl = woerterbuch.eintraege.count
+        guard anzahl > 0 else {
+            melde("Das Wörterbuch ist leer, es gibt nichts abzuleiten.")
+            return
+        }
+        let frage = NSAlert()
+        frage.messageText = "Alle \(anzahl) Decknamen neu aus dem Seed ableiten?"
+        frage.informativeText = "Jeder Eintrag bekommt den Deckname, der zu diesem Seed und seinem "
+            + "Namen passt. Schon verschickte Texte gehen weiter auf, die alten Decknamen bleiben "
+            + "als frühere erhalten. Selbst vergebene Decknamen ändern sich nicht."
+        frage.addButton(withTitle: "Neu ableiten")
+        frage.addButton(withTitle: "Abbrechen")
+        guard frage.runModal() == .alertFirstButtonReturn else { return }
+
+        let geaendert = woerterbuch.leiteAlleNeuAb()
+        freiliste?.setze(woerterbuch: woerterbuch)
+        beimWoerterbuch(woerterbuch)
+        melde(geaendert == 0
+            ? "Alle Decknamen passten schon zum Seed."
+            : "\(geaendert) Decknamen neu abgeleitet, die alten bleiben auflösbar.")
+    }
+
+    private func melde(_ text: String) {
+        seedMeldung.stringValue = text
+    }
 
     private func ueberschrift(_ text: String) -> NSTextField {
         let feld = NSTextField(labelWithString: text)

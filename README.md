@@ -6,9 +6,13 @@ dem eigenen Mac, es geht nichts ins Netz.
 
 Aus `Sehr geehrter Herr Nyström, Ihre IBAN DE89 … stimmt.` wird
 `Sehr geehrter Herr PERSON_3F9A1C7B2E4D6A0B5C, Ihre IBAN IBAN_A41C… stimmt.`
-Die Kennung hinter dem Kürzel ist Zufall, damit sich aus ihr nichts ablesen
-lässt — weder wie viele Einträge es gibt noch in welcher Reihenfolge sie
-entstanden. Die Zuordnung liegt verschlüsselt im Wörterbuch auf dem Rechner.
+Die Kennung hinter dem Kürzel wird aus einem geheimen Seed und dem Namen
+abgeleitet. Ohne den Seed sieht sie aus wie Zufall — weder Anzahl noch
+Reihenfolge der Einträge lassen sich ablesen, und aus der Kennung nicht der
+Name. Mit dem Seed ist sie nachvollziehbar: wer denselben Seed hat, bekommt
+für denselben Namen denselben Deckname und kann einen Text zurückdrehen,
+sobald der Name in seinem Wörterbuch steht. Der Seed steht in den
+Einstellungen und liegt mit dem Wörterbuch verschlüsselt auf dem Rechner.
 Kommt die Antwort zurück, werden die Platzhalter wieder zu den echten Namen.
 
 ## Herunterladen

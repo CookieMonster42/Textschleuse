@@ -86,6 +86,8 @@ public enum Schleuse {
                 } else {
                     let platzhalter = freierPlatzhalter(
                         fuer: .unbekannt,
+                        text: funde[index].text,
+                        seed: arbeitsbuch.seed,
                         belegt: Set(unbekannte.keys).union(arbeitsbuch.alleDecknamen)
                     )
                     vergebeneUnbekannte[schluessel] = platzhalter
@@ -202,7 +204,7 @@ public enum Schleuse {
 
             // Auch der Nachschlag braucht einen Decknamen, sonst steht er als
             // Klartext im Ergebnis.
-            let platzhalter = freierPlatzhalter(fuer: .unbekannt, in: analyse)
+            let platzhalter = freierPlatzhalter(fuer: .unbekannt, text: fund.text, in: analyse)
             fund.platzhalter = platzhalter
             analyse.unbekannte[platzhalter] = fund.text
             analyse.funde.append(fund)
@@ -339,7 +341,7 @@ public enum Schleuse {
             fund.eintragId = eintrag.id
             fund.platzhalter = eintrag.platzhalter
         } else {
-            fund.platzhalter = freierPlatzhalter(fuer: kategorie, in: analyse)
+            fund.platzhalter = freierPlatzhalter(fuer: kategorie, text: text, in: analyse)
             analyse.unbekannte[fund.platzhalter] = text
         }
 
@@ -438,19 +440,21 @@ public enum Schleuse {
 
     /// Ein Platzhalter, der in diesem Text noch frei ist. Für Markierungen, die
     /// nicht ins Wörterbuch sollen, und für die Unbekannten.
-    private static func freierPlatzhalter(fuer kategorie: Kategorie, in analyse: Analyse) -> String {
+    private static func freierPlatzhalter(fuer kategorie: Kategorie, text: String, in analyse: Analyse) -> String {
         let belegt = Set(analyse.funde.map(\.platzhalter))
             .union(analyse.unbekannte.keys)
             .union(analyse.woerterbuch.alleDecknamen)
-        return freierPlatzhalter(fuer: kategorie, belegt: belegt)
+        return freierPlatzhalter(fuer: kategorie, text: text, seed: analyse.woerterbuch.seed, belegt: belegt)
     }
 
-    private static func freierPlatzhalter(fuer kategorie: Kategorie, belegt: Set<String>) -> String {
-        var name: String
-        repeat {
-            name = "\(kategorie.praefix)_\(Decknamen.kennung(fuer: kategorie, belegt: belegt))"
-        } while belegt.contains(name)
-        return name
+    private static func freierPlatzhalter(
+        fuer kategorie: Kategorie,
+        text: String,
+        seed: String,
+        belegt: Set<String>
+    ) -> String {
+        let kennung = Decknamen.kennung(fuer: text, kategorie: kategorie, seed: seed, belegt: belegt)
+        return "\(kategorie.praefix)_\(kennung)"
     }
 
     private static func uebernimmFuerGleichlautende(

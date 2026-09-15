@@ -45,6 +45,12 @@ final class Steuerung: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func ladeWoerterbuch() {
         do {
             woerterbuch = try speicher.laden()
+            // Eine Datei von vor dem Seed: der frische Seed muss sofort in
+            // die Datei, sonst wäre er beim nächsten Start ein anderer.
+            if woerterbuch.seedWarNeu {
+                woerterbuch.seedWarNeu = false
+                try? speicher.sichern(woerterbuch)
+            }
         } catch {
             let meldung = NSAlert()
             meldung.messageText = "Das Wörterbuch ließ sich nicht laden"
