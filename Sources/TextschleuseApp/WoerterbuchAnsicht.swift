@@ -10,7 +10,6 @@ final class WoerterbuchAnsicht: NSView {
 
     private var woerterbuch: Woerterbuch
     private let beimSichern: (Woerterbuch) -> Void
-    private let beimExportieren: (URL, Woerterbuch) throws -> Void
 
     /// Links: was im gerade bearbeiteten Text vorkommt. Rechts: alles, was
     /// im Wörterbuch steht.
@@ -57,13 +56,11 @@ final class WoerterbuchAnsicht: NSView {
     init(
         woerterbuch: Woerterbuch,
         schmal: Bool = false,
-        beimSichern: @escaping (Woerterbuch) -> Void,
-        beimExportieren: @escaping (URL, Woerterbuch) throws -> Void
+        beimSichern: @escaping (Woerterbuch) -> Void
     ) {
         self.woerterbuch = woerterbuch
         self.schmal = schmal
         self.beimSichern = beimSichern
-        self.beimExportieren = beimExportieren
         super.init(frame: NSRect(x: 0, y: 0, width: schmal ? 340 : 980, height: 560))
 
         baueOberflaeche()
@@ -531,13 +528,25 @@ final class WoerterbuchAnsicht: NSView {
         guard auswahl.runModal() == .OK, let ziel = auswahl.url else { return }
 
         do {
-            try beimExportieren(ziel, woerterbuch)
+            try schreibeExport(nach: ziel)
+            meldeExport("Exportiert nach \(ziel.path)")
         } catch {
             let fehler = NSAlert()
             fehler.messageText = "Der Export ist fehlgeschlagen"
             fehler.informativeText = error.localizedDescription
             fehler.runModal()
         }
+    }
+
+    /// Der Export selbst, ohne Dialoge — derselbe Weg an jeder Einbaustelle
+    /// und für den Selbsttest erreichbar.
+    func schreibeExport(nach ziel: URL) throws {
+        try Speicher.exportiereKlartext(woerterbuch, nach: ziel)
+        Einstellungen.gemeinsam.backupPfad = ziel
+    }
+
+    private func meldeExport(_ text: String) {
+        zaehler.stringValue = text
     }
 }
 

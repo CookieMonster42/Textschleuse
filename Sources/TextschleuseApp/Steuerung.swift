@@ -49,7 +49,11 @@ final class Steuerung: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // die Datei, sonst wäre er beim nächsten Start ein anderer.
             if woerterbuch.seedWarNeu {
                 woerterbuch.seedWarNeu = false
-                try? speicher.sichern(woerterbuch)
+                do {
+                    try speicher.sichern(woerterbuch)
+                } catch {
+                    zeigeFehler("Der neue Seed ließ sich nicht speichern", error)
+                }
             }
         } catch {
             let meldung = NSAlert()
@@ -504,9 +508,6 @@ final class Steuerung: NSObject, NSApplicationDelegate, NSMenuDelegate {
             beimSichern: { [weak self] geaendert in
                 guard self?.sichereWoerterbuch(geaendert) == true else { return }
                 self?.woerterbuch = geaendert
-            },
-            beimExportieren: { [weak self] ziel, buch in
-                try self?.speicher.exportiereKlartext(buch, nach: ziel)
             }
         )
     }

@@ -6,9 +6,13 @@ public enum SpeicherFehler: LocalizedError {
     case entschluesselnFehlgeschlagen
     case falscheVersion(Int)
     case wuerdeSchrumpfen(vorher: Int, nachher: Int)
+    /// Der Export hat keine oder eine leere Datei hinterlassen.
+    case exportLeer(String)
 
     public var errorDescription: String? {
         switch self {
+        case .exportLeer(let pfad):
+            return "Der Export hat keine Datei hinterlassen: \(pfad)"
         case .schluesselNichtLesbar(let status):
             return "Der Schlüssel aus der Keychain lässt sich nicht lesen (Status \(status))."
         case .entschluesselnFehlgeschlagen:
@@ -243,9 +247,20 @@ public final class Speicher {
     /// Schreibt das Wörterbuch unverschlüsselt. Enthält echte Namen und
     /// Bankdaten — die Oberfläche sagt das vor dem Export deutlich.
     public func exportiereKlartext(_ buch: Woerterbuch, nach ziel: URL) throws {
+        try Self.exportiereKlartext(buch, nach: ziel)
+    }
+
+    /// Statisch und ohne Umweg über eine Closure. Vorher wurde der Export
+    /// als Closure durchgereicht, und an zwei von drei Einbaustellen war
+    /// die leer: der Dialog ging auf, meldete Erfolg, und es lag nichts da.
+    /// Deshalb prüft der Export jetzt auch selbst, ob die Datei da ist.
+    public static func exportiereKlartext(_ buch: Woerterbuch, nach ziel: URL) throws {
         let daten = try JSONEncoder.textschleuseLesbar.encode(buch)
         try daten.write(to: ziel, options: [.atomic])
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: ziel.path)
+
+        let groesse = (try? FileManager.default.attributesOfItem(atPath: ziel.path)[.size] as? Int) ?? 0
+        guard groesse > 0 else { throw SpeicherFehler.exportLeer(ziel.path) }
     }
 
     public func importiereKlartext(von quelle: URL) throws -> Woerterbuch {

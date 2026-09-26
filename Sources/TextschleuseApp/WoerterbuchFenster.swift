@@ -10,14 +10,12 @@ final class WoerterbuchFenster: NSWindowController {
 
     static func zeige(
         woerterbuch: Woerterbuch,
-        beimSichern: @escaping (Woerterbuch) -> Void,
-        beimExportieren: @escaping (URL, Woerterbuch) throws -> Void
+        beimSichern: @escaping (Woerterbuch) -> Void
     ) {
         offen?.close()
         let fenster = WoerterbuchFenster(
             woerterbuch: woerterbuch,
-            beimSichern: beimSichern,
-            beimExportieren: beimExportieren
+            beimSichern: beimSichern
         )
         offen = fenster
         fenster.showWindow(nil)
@@ -26,13 +24,11 @@ final class WoerterbuchFenster: NSWindowController {
 
     init(
         woerterbuch: Woerterbuch,
-        beimSichern: @escaping (Woerterbuch) -> Void,
-        beimExportieren: @escaping (URL, Woerterbuch) throws -> Void
+        beimSichern: @escaping (Woerterbuch) -> Void
     ) {
         let ansicht = WoerterbuchAnsicht(
             woerterbuch: woerterbuch,
-            beimSichern: beimSichern,
-            beimExportieren: beimExportieren
+            beimSichern: beimSichern
         )
         let fenster = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 980, height: 560),
