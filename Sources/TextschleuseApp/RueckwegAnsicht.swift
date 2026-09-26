@@ -478,13 +478,13 @@ final class RueckwegAnsicht: NSView, NSUserInterfaceValidations {
 
         let wahl = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 320, height: 25))
         for kategorie in Kategorie.allCases where kategorie != .unbekannt {
-            wahl.addItem(withTitle: kategorie.anzeigename)
+            wahl.addItem(withTitle: kategorie.anzeigepfad)
             wahl.lastItem?.representedObject = kategorie.rawValue
         }
         // Aus PERSON_3 lässt sich der Typ ablesen; aus UNBEKANNT_3 nicht.
         if let passend = Kategorie.allCases.first(where: { platzhalter.hasPrefix($0.praefix + "_") }),
            passend != .unbekannt {
-            wahl.selectItem(withTitle: passend.anzeigename)
+            wahl.selectItem(withTitle: passend.anzeigepfad)
         }
 
         let stapel = NSStackView(views: [feld, wahl])

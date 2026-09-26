@@ -380,11 +380,10 @@ final class Steuerung: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         for (platz, kategorie) in Kategorie.zurWahl(mit: woerterbuch).enumerated().reversed() {
             let eintrag = NSMenuItem(
-                title: "Als \(kategorie.anzeigename) schützen",
+                title: "Als \(kategorie.anzeigepfad) schützen",
                 action: Selector(("aktionKategorie:")),
-                // ⌘0 gehört schon „Fenster zeigen"; der zehnte Platz hat
-                // deshalb nur die nackte Ziffer bei markiertem Text.
-                keyEquivalent: platz < 9 ? (Kategorie.taste(fuerPlatz: platz) ?? "") : ""
+                // Die zugeschalteten Erkennungen haben keine Ziffer.
+                keyEquivalent: Kategorie.taste(fuerPlatz: platz) ?? ""
             )
             eintrag.tag = platz
             menue.insertItem(eintrag, at: 0)

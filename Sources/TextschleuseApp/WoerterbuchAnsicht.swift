@@ -350,9 +350,9 @@ final class WoerterbuchAnsicht: NSView {
             let kopf = Zeile(
                 eintragId: UUID(),
                 istAlias: false,
-                text: "\(gruppe.kategorie.anzeigename)  ·  \(gruppe.eintraege.count)",
+                text: "\(gruppe.kategorie.anzeigepfad)  ·  \(gruppe.eintraege.count)",
                 platzhalter: "",
-                kategorie: gruppe.kategorie.anzeigename,
+                kategorie: gruppe.kategorie.anzeigepfad,
                 herkunft: "",
                 istKopf: true
             )
@@ -362,7 +362,7 @@ final class WoerterbuchAnsicht: NSView {
                     istAlias: false,
                     text: eintrag.text,
                     platzhalter: eintrag.platzhalter,
-                    kategorie: eintrag.kategorie.anzeigename,
+                    kategorie: eintrag.kategorie.anzeigepfad,
                     herkunft: eintrag.automatischErkannt ? "automatisch erkannt" : "gemerkt"
                 )
                 let aliase = eintrag.aliase.map { alias in
@@ -371,7 +371,7 @@ final class WoerterbuchAnsicht: NSView {
                         istAlias: true,
                         text: "↳ \(alias.text)",
                         platzhalter: eintrag.platzhalter(fuer: alias),
-                        kategorie: eintrag.kategorie.anzeigename,
+                        kategorie: eintrag.kategorie.anzeigepfad,
                         herkunft: "Schreibweise"
                     )
                 }

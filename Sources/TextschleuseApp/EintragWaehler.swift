@@ -300,7 +300,7 @@ final class ZuordnungsFenster: NSObject, NSTableViewDataSource, NSTableViewDeleg
     }
 
     private func kopfzelle(_ kategorie: Kategorie, _ anzahl: Int) -> NSView {
-        let titel = NSTextField(labelWithString: "\(kategorie.anzeigename)  ·  \(anzahl)")
+        let titel = NSTextField(labelWithString: "\(kategorie.anzeigepfad)  ·  \(anzahl)")
         titel.font = .systemFont(ofSize: 11, weight: .semibold)
         titel.textColor = .secondaryLabelColor
         titel.translatesAutoresizingMaskIntoConstraints = false

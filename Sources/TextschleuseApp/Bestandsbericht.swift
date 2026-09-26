@@ -60,7 +60,7 @@ enum Bestandsbericht {
             + "\(buch.eintraege.reduce(0) { $0 + $1.aliase.count }) Schreibweisen")
         for gruppe in Eintragsliste.gruppiert(buch.eintraege) {
             let automatisch = gruppe.eintraege.filter(\.automatischErkannt).count
-            print("  \(gruppe.kategorie.anzeigename): \(gruppe.eintraege.count)"
+            print("  \(gruppe.kategorie.anzeigepfad): \(gruppe.eintraege.count)"
                 + (automatisch > 0 ? " (davon \(automatisch) automatisch erkannt)" : ""))
         }
         // Die höchste vergebene Nummer verrät, wie viele Einträge es einmal
