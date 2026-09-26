@@ -34,7 +34,7 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
     private var textAnsicht: ChiptextAnsicht { flaeche.text }
     private var rollflaeche: NSScrollView { flaeche.rolle }
     private let liste = Fundstellenliste()
-    private lazy var suche = Textsuche(ziel: textAnsicht)
+    private lazy var suche = Textsuche(ziel: textAnsicht, mitErsetzen: true)
 
     /// Aus heißt: Originaltext mit Chips, also `Meier → PERSON_1` inline.
     /// An heißt: nur der nackte Originaltext, wenn die Chips im Weg sind.
@@ -157,6 +157,9 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
         suche.beimSchliessen = { [weak self] in
             guard let self else { return }
             self.window?.makeFirstResponder(self.textAnsicht)
+        }
+        suche.beimErsetzen = { [weak self] auftrag in
+            self?.ersetze(auftrag) ?? 0
         }
 
         // Der Text ist direkt bearbeitbar. Was dasteht, ist der Originaltext;
@@ -1151,6 +1154,18 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
     func pruefeJetztFuerPruefung() { pruefeJetzt() }
     func ausgewaehlterBegriffFuerPruefung() -> String? { aktuellerFund?.text }
     func decknameUebernehmenFuerPruefung() { decknameUebernehmen() }
+    func verwerfeAktuellenFuerPruefung() { verwerfeAktuellen() }
+    /// Ohne laufende Ereignisschleife landen alle Stände in einer Gruppe und
+    /// ein ⌘Z nähme alles auf einmal zurück. Der Selbsttest schließt die
+    /// Gruppe deshalb dort, wo im Betrieb ein Ereignis endet.
+    func schliesseStandFuerPruefung() {
+        guard verlauf.groupingLevel > 0 else { return }
+        verlauf.endUndoGrouping()
+        // Gleich wieder auf: der Verlauf öffnet seine Ereignisgruppe erst im
+        // nächsten Durchlauf der Ereignisschleife, und `registerUndo` ohne
+        // offene Gruppe wirft. Eine leere Gruppe fällt beim Schließen weg.
+        verlauf.beginUndoGrouping()
+    }
     @discardableResult
     func fokussiereTextFuerPruefung() -> Bool {
         window?.makeFirstResponder(textAnsicht) ?? false
@@ -1297,7 +1312,58 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
         aktualisiere()
     }
 
-    /// Holt sich, was jetzt in der Zwischenablage liegt    /// Holt sich, was jetzt in der Zwischenablage liegt, und fängt damit von
+    // MARK: Ersetzen
+
+    /// Ersetzt im Originaltext und prüft den Text danach neu — die
+    /// Entscheidungen bleiben, ⌘Z nimmt den ganzen Durchlauf zurück.
+    ///
+    /// Ein einzelner Treffer kommt aus der Anzeige; er wird auf den
+    /// Originaltext zurückgerechnet. Liegt er in einem Decknamen, deckt der
+    /// zurückgerechnete Bereich nicht den Suchbegriff, und es passiert nichts.
+    private func ersetze(_ auftrag: Textsuche.Auftrag) -> Int {
+        let ergebnis: Textersatz.Ergebnis
+        if let anzeige = auftrag.nurAktuellen {
+            guard let original = Chiptext.originalBereich(fuer: anzeige, in: textAnsicht.attributedString())
+            else { return 0 }
+            let stueck = (analyse.original as NSString).substring(with: original)
+            guard stueck.compare(auftrag.begriff, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+            else { return 0 }
+            ergebnis = Textersatz.ersetze(in: analyse.original, bereich: original, durch: auftrag.ersatz)
+        } else {
+            ergebnis = Textersatz.ersetze(
+                in: analyse.original,
+                begriff: auftrag.begriff,
+                durch: auftrag.ersatz,
+                wortgrenzen: auftrag.wortgrenzen
+            )
+        }
+        guard ergebnis.anzahl > 0 else { return 0 }
+
+        let marke = originalMarke()
+        merkeStand("Ersetzen")
+        let vorherigerBegriff = aktuellerFund?.text
+        let vorherigeStelle = aktuellerFund?.bereich.location
+        analyse = Schleuse.analysiereErneut(ergebnis.text, wie: analyse)
+        aktualisiere(originalMarke: marke)
+        stelleAuswahlWiederHer(begriff: vorherigerBegriff, nahe: vorherigeStelle)
+
+        meldung.textColor = .secondaryLabelColor
+        meldung.stringValue = (ergebnis.anzahl == 1
+            ? "Eine Stelle ersetzt"
+            : "\(ergebnis.anzahl) Stellen ersetzt") + ". ⌘Z nimmt das zurück."
+        return ergebnis.anzahl
+    }
+
+    /// Für den Selbsttest.
+    func ersetzeAlleFuerPruefung(_ begriff: String, durch ersatz: String, wortgrenzen: Bool = false) -> Int {
+        suche.ersetzeAlleFuerPruefung(begriff, durch: ersatz, wortgrenzen: wortgrenzen)
+    }
+    func ersetzeAktuellenFuerPruefung(_ begriff: String, durch ersatz: String) -> Int {
+        suche.ersetzeAktuellenFuerPruefung(begriff, durch: ersatz)
+    }
+    func sucheHatErsatzzeileFuerPruefung() -> Bool { suche.hatErsatzzeile }
+
+    /// Holt sich, was jetzt in der Zwischenablage liegt, und fängt damit von
     /// vorn an. Das Wörterbuch bleibt, alles andere am alten Text ist weg.
     @objc private func neuEinlesen() {
         guard let text = Zwischenablage.lies() else {

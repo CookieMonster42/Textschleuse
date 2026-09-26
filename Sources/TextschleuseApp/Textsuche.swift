@@ -1,4 +1,5 @@
 import AppKit
+import TextschleuseCore
 
 /// Die Suchzeile über dem Text. ⌘F klappt sie auf.
 ///
@@ -9,22 +10,46 @@ import AppKit
 /// Chips überschreiben, und die tragen die wichtigere Information: grün heißt
 /// steht fest, rot heißt geraten. Stattdessen wird der aktuelle Treffer
 /// markiert und mit der gewohnten gelben Lupe kurz aufblitzen gelassen.
+///
+/// Darunter, wo es etwas zu ersetzen gibt, eine zweite Zeile: der Ersatz, ein
+/// Haken für ganze Wörter, „Ersetzen" und „Alle ersetzen". Ersetzt wird im
+/// Originaltext; das macht der Besitzer der Zeile über `beimErsetzen`. Im
+/// Rückweg bleibt die Zeile verborgen — dort gibt es nichts zu ersetzen, und
+/// eine Zeile ohne Wirkung wäre eine Falle.
 final class Textsuche: NSView {
+
+    /// Was ersetzt werden soll. `nurAktuellen` ist der Treffer in der
+    /// Anzeige, auf den es geht; nil heißt alle.
+    struct Auftrag {
+        var begriff: String
+        var ersatz: String
+        var wortgrenzen: Bool
+        var nurAktuellen: NSRange?
+    }
 
     /// Läuft, wenn die Suche zugeklappt wird. Das Popup holt sich damit den
     /// Tastaturfokus zurück.
     var beimSchliessen: (() -> Void)?
+    /// Führt den Ersatz aus und liefert, wie viele Stellen es waren.
+    var beimErsetzen: ((Auftrag) -> Int)?
 
     private weak var ziel: ChiptextAnsicht?
     private let feld = NSSearchField()
     private let zaehler = NSTextField(labelWithString: "")
+    private let ersatzFeld = NSTextField()
+    private let wortgrenzenHaken = NSButton(checkboxWithTitle: "Ganze Wörter", target: nil, action: nil)
+    private var ersetzenKnopf = NSButton()
+    private var alleKnopf = NSButton()
+    private let ersatzZeile = NSStackView()
     private var treffer: [NSRange] = []
     private var index = 0
+    private let mitErsetzen: Bool
 
     var istOffen: Bool { !isHidden }
 
-    init(ziel: ChiptextAnsicht) {
+    init(ziel: ChiptextAnsicht, mitErsetzen: Bool = false) {
         self.ziel = ziel
+        self.mitErsetzen = mitErsetzen
         super.init(frame: .zero)
         baueAuf()
         isHidden = true
@@ -58,14 +83,47 @@ final class Textsuche: NSView {
         zeile.orientation = .horizontal
         zeile.spacing = 6
         zeile.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(zeile)
+
+        ersatzFeld.placeholderString = "Ersetzen durch"
+        ersatzFeld.font = .systemFont(ofSize: 12)
+        ersatzFeld.delegate = self
+        ersatzFeld.translatesAutoresizingMaskIntoConstraints = false
+        ersatzFeld.toolTip = "⏎ ersetzt den aktuellen Treffer"
+        wortgrenzenHaken.controlSize = .small
+        wortgrenzenHaken.font = .systemFont(ofSize: 11)
+        wortgrenzenHaken.target = self
+        wortgrenzenHaken.action = #selector(wortgrenzenGeaendert)
+        wortgrenzenHaken.toolTip = "Nur ganze Wörter: „Mai\" trifft nicht „Maier\"."
+        ersetzenKnopf = NSButton(title: "Ersetzen", target: self, action: #selector(ersetzeAktuellen))
+        ersetzenKnopf.toolTip = "Den aktuellen Treffer ersetzen und zum nächsten gehen"
+        alleKnopf = NSButton(title: "Alle ersetzen", target: self, action: #selector(ersetzeAlle))
+        alleKnopf.toolTip = "Jede Stelle im Text ersetzen. ⌘Z nimmt alles auf einmal zurück."
+        for knopf in [ersetzenKnopf, alleKnopf] {
+            knopf.bezelStyle = .rounded
+            knopf.controlSize = .small
+        }
+
+        ersatzZeile.setViews([ersatzFeld, wortgrenzenHaken, ersetzenKnopf, alleKnopf], in: .leading)
+        ersatzZeile.orientation = .horizontal
+        ersatzZeile.spacing = 6
+        ersatzZeile.translatesAutoresizingMaskIntoConstraints = false
+        ersatzZeile.isHidden = !mitErsetzen
+
+        let stapel = NSStackView(views: [zeile, ersatzZeile])
+        stapel.orientation = .vertical
+        stapel.alignment = .leading
+        stapel.spacing = 6
+        stapel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stapel)
 
         NSLayoutConstraint.activate([
-            zeile.topAnchor.constraint(equalTo: topAnchor),
-            zeile.bottomAnchor.constraint(equalTo: bottomAnchor),
-            zeile.leadingAnchor.constraint(equalTo: leadingAnchor),
-            zeile.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stapel.topAnchor.constraint(equalTo: topAnchor),
+            stapel.bottomAnchor.constraint(equalTo: bottomAnchor),
+            stapel.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stapel.trailingAnchor.constraint(equalTo: trailingAnchor),
             feld.widthAnchor.constraint(greaterThanOrEqualToConstant: 220),
+            // Der Ersatz steht bündig unter dem Suchbegriff.
+            ersatzFeld.widthAnchor.constraint(equalTo: feld.widthAnchor),
         ])
     }
 
@@ -87,35 +145,32 @@ final class Textsuche: NSView {
     @objc private func schliesseGeklickt() { schliesse() }
 
     /// Nach jedem Neuaufbau des Textes aufrufen: die Fundstellen sind dann
-    /// verschoben, die alten Bereiche zeigen ins Leere.
+    /// verschoben, die alten Bereiche zeigen ins Leere. Die Stelle in der
+    /// Trefferliste bleibt, damit „Ersetzen" beim nächsten Treffer landet
+    /// und nicht wieder vorn.
     func aktualisiere() {
         guard istOffen else { return }
+        let bisher = index
         sucheNeu(springen: false)
+        index = treffer.isEmpty ? 0 : min(bisher, treffer.count - 1)
+        beschrifteZaehler()
     }
 
     // MARK: Suchen
+
+    private var wortgrenzen: Bool { wortgrenzenHaken.state == .on }
 
     private func sucheNeu(springen: Bool = true) {
         treffer = []
         index = 0
 
         let begriff = feld.stringValue
-        if let text = ziel?.string as NSString?, !begriff.isEmpty {
-            var start = 0
-            while start < text.length {
-                let rest = NSRange(location: start, length: text.length - start)
-                let gefunden = text.range(
-                    of: begriff,
-                    options: [.caseInsensitive, .diacriticInsensitive],
-                    range: rest
-                )
-                guard gefunden.location != NSNotFound else { break }
-                treffer.append(gefunden)
-                start = gefunden.location + max(1, gefunden.length)
-            }
+        if let text = ziel?.string, !begriff.isEmpty {
+            treffer = Textersatz.vorkommen(von: begriff, in: text, wortgrenzen: wortgrenzen)
         }
 
         beschrifteZaehler()
+        aktualisiereKnoepfe()
         if springen, !treffer.isEmpty { springeZuAktuellem() }
     }
 
@@ -129,6 +184,12 @@ final class Textsuche: NSView {
             zaehler.stringValue = "\(index + 1) von \(treffer.count)"
             zaehler.textColor = .secondaryLabelColor
         }
+    }
+
+    private func aktualisiereKnoepfe() {
+        let geht = !treffer.isEmpty && beimErsetzen != nil
+        ersetzenKnopf.isEnabled = geht
+        alleKnopf.isEnabled = geht
     }
 
     private func springeZuAktuellem() {
@@ -159,11 +220,73 @@ final class Textsuche: NSView {
         index = (index - 1 + treffer.count) % treffer.count
         springeZuAktuellem()
     }
+
+    // MARK: Ersetzen
+
+    @objc private func wortgrenzenGeaendert() {
+        sucheNeu(springen: false)
+    }
+
+    @objc private func ersetzeAktuellen() {
+        guard treffer.indices.contains(index) else { return }
+        let anzahl = beimErsetzen?(Auftrag(
+            begriff: feld.stringValue,
+            ersatz: ersatzFeld.stringValue,
+            wortgrenzen: wortgrenzen,
+            nurAktuellen: treffer[index]
+        )) ?? 0
+        // Der Besitzer baut den Text neu und ruft `aktualisiere`; danach
+        // steht der Zeiger auf dem nächsten Treffer.
+        if anzahl == 0 {
+            zaehler.stringValue = "Treffer liegt in einem Decknamen"
+            zaehler.textColor = .systemRed
+        } else if !treffer.isEmpty {
+            springeZuAktuellem()
+        }
+    }
+
+    @objc private func ersetzeAlle() {
+        guard !treffer.isEmpty else { return }
+        let anzahl = beimErsetzen?(Auftrag(
+            begriff: feld.stringValue,
+            ersatz: ersatzFeld.stringValue,
+            wortgrenzen: wortgrenzen,
+            nurAktuellen: nil
+        )) ?? 0
+        zaehler.stringValue = anzahl == 1 ? "1 Stelle ersetzt" : "\(anzahl) Stellen ersetzt"
+        zaehler.textColor = .secondaryLabelColor
+    }
+
+    /// Für den Selbsttest: Ersatz setzen und alle ersetzen, ohne Tastatur.
+    @discardableResult
+    func ersetzeAlleFuerPruefung(_ begriff: String, durch ersatz: String, wortgrenzen: Bool) -> Int {
+        feld.stringValue = begriff
+        ersatzFeld.stringValue = ersatz
+        wortgrenzenHaken.state = wortgrenzen ? .on : .off
+        sucheNeu(springen: false)
+        guard !treffer.isEmpty else { return 0 }
+        return beimErsetzen?(Auftrag(
+            begriff: begriff, ersatz: ersatz, wortgrenzen: wortgrenzen, nurAktuellen: nil
+        )) ?? 0
+    }
+
+    func ersetzeAktuellenFuerPruefung(_ begriff: String, durch ersatz: String) -> Int {
+        feld.stringValue = begriff
+        ersatzFeld.stringValue = ersatz
+        sucheNeu(springen: false)
+        guard treffer.indices.contains(index) else { return 0 }
+        return beimErsetzen?(Auftrag(
+            begriff: begriff, ersatz: ersatz, wortgrenzen: wortgrenzen, nurAktuellen: treffer[index]
+        )) ?? 0
+    }
+
+    var hatErsatzzeile: Bool { !ersatzZeile.isHidden }
 }
 
-extension Textsuche: NSSearchFieldDelegate {
+extension Textsuche: NSSearchFieldDelegate, NSTextFieldDelegate {
 
     func controlTextDidChange(_ meldung: Notification) {
+        guard (meldung.object as AnyObject?) === feld else { return }
         sucheNeu()
     }
 
@@ -177,7 +300,7 @@ extension Textsuche: NSSearchFieldDelegate {
             schliesse()
             return true
         case #selector(NSResponder.insertNewline(_:)):
-            naechster()
+            if steuerelement === ersatzFeld { ersetzeAktuellen() } else { naechster() }
             return true
         case #selector(NSResponder.moveDown(_:)):
             naechster()
