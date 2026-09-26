@@ -46,13 +46,16 @@ final class Steuerung: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do {
             woerterbuch = try speicher.laden()
             // Eine Datei von vor dem Seed: der frische Seed muss sofort in
-            // die Datei, sonst wäre er beim nächsten Start ein anderer.
-            if woerterbuch.seedWarNeu {
+            // die Datei, sonst wäre er beim nächsten Start ein anderer. Und
+            // Kennungen mit achtzehn Stellen werden auf acht umgestellt; die
+            // alten bleiben auflösbar.
+            let umgestellt = woerterbuch.migriereKennungslaenge()
+            if woerterbuch.seedWarNeu || umgestellt > 0 {
                 woerterbuch.seedWarNeu = false
                 do {
                     try speicher.sichern(woerterbuch)
                 } catch {
-                    zeigeFehler("Der neue Seed ließ sich nicht speichern", error)
+                    zeigeFehler("Das Wörterbuch ließ sich nach der Umstellung nicht speichern", error)
                 }
             }
         } catch {

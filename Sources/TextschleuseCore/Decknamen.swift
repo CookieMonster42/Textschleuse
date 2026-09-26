@@ -1,10 +1,13 @@
 import CryptoKit
 import Foundation
 
-/// Woher die Kennung hinter dem Kategoriekürzel kommt: `PERSON_3F9A1C7B2E4D6A0B5C`.
+/// Woher die Kennung hinter dem Kategoriekürzel kommt: `PERSON_3F9A1C2D`.
 ///
 /// Sie wird aus dem Seed des Wörterbuchs und dem Wortlaut abgeleitet
-/// (HMAC-SHA256, achtzehn Stellen). Das heißt: gleicher Seed, gleicher
+/// (HMAC-SHA256, acht Hexzeichen). Acht statt achtzehn, weil ein Text mit
+/// zwanzig Fundstellen sonst unlesbar wird und Modelle lange Hexfolgen
+/// gelegentlich verstümmeln; vier Milliarden Möglichkeiten reichen, und bei
+/// einer Kollision zählt die Ableitung eine Runde weiter. Das heißt: gleicher Seed, gleicher
 /// Name, gleiche Kennung — auf jedem Rechner und auch nach dem Löschen und
 /// Neuanlegen. Wer den Seed hat und den Namen kennt, weiß, welcher
 /// Deckname dazugehört, und kann einen Text zurückdrehen, sobald der Name
@@ -16,7 +19,10 @@ import Foundation
 /// verschlüsselten Wörterbuch und wandert mit dem Klartext-Export.
 public enum Decknamen {
 
-    public static let kennungslaenge = 18
+    public static let kennungslaenge = 8
+    /// Die Länge aus den Versionen 0.2 bis 0.4. Solche Kennungen bleiben
+    /// auflösbar und werden beim Laden auf acht Stellen umgestellt.
+    public static let alteKennungslaenge = 18
 
     public struct Anfrage {
         public var text: String
@@ -71,10 +77,19 @@ public enum Decknamen {
             .joined(separator: " ")
     }
 
-    /// Ein frischer Seed: 32 Stellen aus zwei UUIDs.
+    /// Ein frischer Seed: 256 Bit aus dem Systemzufall, als 64 Hexzeichen.
+    /// Ältere Seeds mit 32 Stellen bleiben gültig — der Seed ist eine
+    /// Zeichenkette, jede Länge tut.
     public static func neuerSeed() -> String {
-        let roh = (UUID().uuidString + UUID().uuidString).replacingOccurrences(of: "-", with: "")
-        return String(roh.prefix(32)).uppercased()
+        SymmetricKey(size: .bits256).withUnsafeBytes { bytes in
+            bytes.map { String(format: "%02X", $0) }.joined()
+        }
+    }
+
+    /// Die ersten acht Stellen. Das reicht, um zwei Seeds zu vergleichen,
+    /// und verrät den Rest nicht.
+    public static func fingerabdruck(_ seed: String) -> String {
+        String(seed.prefix(8))
     }
 
     public static func zufallskennung() -> String {
@@ -82,10 +97,17 @@ public enum Decknamen {
         return String(roh.prefix(kennungslaenge)).uppercased()
     }
 
-    /// Sieht eine Kennung aus wie eine von hier: achtzehn Stellen, nur
-    /// Großbuchstaben A–F und Ziffern.
+    /// Sieht eine Kennung aus wie eine von hier: acht Stellen — oder
+    /// achtzehn aus den früheren Versionen —, nur Großbuchstaben A–F und
+    /// Ziffern.
     public static func istZufallskennung(_ text: String) -> Bool {
-        text.count == kennungslaenge
+        (text.count == kennungslaenge || text.count == alteKennungslaenge)
+            && text.allSatisfy { $0.isHexDigit && ($0.isNumber || $0.isUppercase) }
+    }
+
+    /// Eine Kennung aus den Versionen mit achtzehn Stellen.
+    public static func istAlteKennung(_ text: String) -> Bool {
+        text.count == alteKennungslaenge
             && text.allSatisfy { $0.isHexDigit && ($0.isNumber || $0.isUppercase) }
     }
 

@@ -1,7 +1,7 @@
 import Foundation
 
 /// Eine andere Schreibweise derselben Sache. „Herr Nyström" hängt als Alias an
-/// „Thorben Nyström" und bekommt den Platzhalter `PERSON_3F9A1C7B2E4D6A0B5C_B`.
+/// „Thorben Nyström" und bekommt den Platzhalter `PERSON_3F9A1C2D_B`.
 public struct Alias: Codable, Identifiable, Hashable, Sendable {
     public var id: UUID
     public var text: String
@@ -26,7 +26,7 @@ public struct Eintrag: Codable, Identifiable, Hashable, Sendable {
     /// Einträge haben 0; alte behalten sie, damit `PERSON_7` in schon
     /// verschickten Texten weiter aufgeht.
     public var nummer: Int
-    /// Was hinter dem Kategoriekürzel steht: `3F9A1C7B2E4D6A0B5C`, bei alten
+    /// Was hinter dem Kategoriekürzel steht: `3F9A1C2D`, bei alten
     /// Einträgen die Nummer als Text. Siehe `Decknamen`.
     public var kennung: String
     public var aliase: [Alias]
@@ -95,7 +95,7 @@ public struct Eintrag: Codable, Identifiable, Hashable, Sendable {
 
     public var platzhalter: String { eigenerDeckname ?? standardDeckname }
 
-    /// `PERSON_3F9A1C7B2E4D6A0B5C_B`: der Buchstabe hängt mit Unterstrich an.
+    /// `PERSON_3F9A1C2D_B`: der Buchstabe hängt mit Unterstrich an.
     /// Direkt angehängt — `PERSON_7B` — war er bei einer Kennung aus
     /// Ziffern und Buchstaben nicht mehr zu erkennen.
     public func platzhalter(fuer alias: Alias) -> String {
@@ -290,6 +290,24 @@ public struct Woerterbuch: Codable, Sendable {
     /// tragen. Die alten Namen bleiben als frühere auflösbar. Selbst
     /// vergebene Decknamen bleiben unangetastet. Liefert, wie viele
     /// Einträge sich geändert haben.
+    /// Stellt Kennungen aus den Versionen mit achtzehn Stellen auf acht um.
+    /// Der alte Deckname bleibt als früherer auflösbar. Liefert, wie viele
+    /// Einträge betroffen waren; null heißt: nichts zu tun.
+    @discardableResult
+    public mutating func migriereKennungslaenge() -> Int {
+        var geaendert = 0
+        for index in eintraege.indices where Decknamen.istAlteKennung(eintraege[index].kennung) {
+            let bisher = eintraege[index].platzhalter
+            eintraege[index].kennung = Decknamen.ableiten(text: eintraege[index].text, seed: seed)
+            if eintraege[index].platzhalter != bisher,
+               !eintraege[index].fruehereDecknamen.contains(bisher) {
+                eintraege[index].fruehereDecknamen.append(bisher)
+            }
+            geaendert += 1
+        }
+        return geaendert
+    }
+
     @discardableResult
     public mutating func leiteAlleNeuAb() -> Int {
         var geaendert = 0

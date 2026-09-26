@@ -1775,7 +1775,7 @@ Pruefstand.pruefe("Zufallskennung: achtzehn Stellen, nichts abzulesen") {
     let zweiter = buch.anlegen(text: "Almut Weidenbach", kategorie: .person)
 
     Pruefstand.wahr(erster.platzhalter.hasPrefix("PERSON_"), "Kürzel vorn")
-    Pruefstand.gleich(erster.kennung.count, Decknamen.kennungslaenge, "achtzehn Stellen")
+    Pruefstand.gleich(erster.kennung.count, 8, "acht Stellen")
     Pruefstand.wahr(Decknamen.istZufallskennung(erster.kennung), "nur Großbuchstaben A–F und Ziffern")
     Pruefstand.falsch(erster.kennung == zweiter.kennung, "zwei Einträge, zwei Kennungen")
     Pruefstand.gleich(erster.nummer, 0, "keine laufende Nummer mehr")
@@ -1807,7 +1807,8 @@ Pruefstand.pruefe("Seed: gleicher Seed, gleicher Name, gleicher Deckname") {
     defer { Decknamen.zaehleFuerPruefungen() }
 
     let seed = Decknamen.neuerSeed()
-    Pruefstand.gleich(seed.count, 32, "ein Seed hat 32 Stellen")
+    Pruefstand.gleich(seed.count, 64, "ein Seed hat 64 Hexzeichen, 256 Bit")
+    Pruefstand.gleich(Decknamen.fingerabdruck(seed).count, 8, "der Fingerabdruck sind acht davon")
 
     // Zwei Rechner, ein Seed.
     var hier = Woerterbuch(seed: seed)
@@ -1857,7 +1858,43 @@ Pruefstand.pruefe("Seed: gleicher Seed, gleicher Name, gleicher Deckname") {
 
     // Eine Datei von vor dem Seed bekommt einen — und sagt das.
     let ohne = try! JSONDecoder().decode(Woerterbuch.self, from: Data("{\"version\":1,\"eintraege\":[]}".utf8))
-    Pruefstand.wahr(ohne.seedWarNeu && ohne.seed.count == 32, "alte Datei: frischer Seed, zum Sichern vorgemerkt")
+    Pruefstand.wahr(ohne.seedWarNeu && ohne.seed.count == 64, "alte Datei: frischer Seed, zum Sichern vorgemerkt")
+
+    // Ein Seed mit 32 Stellen aus Version 0.4 bleibt gültig.
+    let alt32 = "0123456789ABCDEF0123456789ABCDEF"
+    var altesBuch = Woerterbuch(seed: alt32)
+    let altEintrag = altesBuch.anlegen(text: "Thorben Nyström", kategorie: .person)
+    Pruefstand.gleich(altEintrag.kennung, Decknamen.ableiten(text: "Thorben Nyström", seed: alt32),
+                      "alter Seed leitet weiter ab")
+}
+
+Pruefstand.pruefe("Kennung: achtzehn Stellen aus 0.4 werden acht, bleiben auflösbar") {
+    Decknamen.ableitenFuerAlle()
+    defer { Decknamen.zaehleFuerPruefungen() }
+
+    // Ein Eintrag, wie ihn Version 0.4 geschrieben hat: achtzehn Hexzeichen.
+    let alteKennung = "3F9A1C7B2E4D6A0B5C"
+    var buch = Woerterbuch(eintraege: [
+        Eintrag(text: "Thorben Nyström", kategorie: .person, kennung: alteKennung),
+    ])
+    let alterName = "PERSON_" + alteKennung
+    Pruefstand.gleich(Rueckweg.analysiere("An \(alterName).", woerterbuch: buch).ergebnis,
+                      "An Thorben Nyström.", "vor der Umstellung geht der alte Name auf")
+
+    Pruefstand.gleich(buch.migriereKennungslaenge(), 1, "ein Eintrag umgestellt")
+    Pruefstand.gleich(buch.migriereKennungslaenge(), 0, "beim zweiten Mal nichts mehr")
+    let neu = buch.eintraege[0]
+    Pruefstand.gleich(neu.kennung.count, 8, "jetzt acht Stellen")
+    Pruefstand.gleich(neu.kennung, Decknamen.ableiten(text: "Thorben Nyström", seed: buch.seed),
+                      "aus dem Seed abgeleitet")
+    Pruefstand.gleich(Rueckweg.analysiere("An \(alterName) und \(neu.platzhalter).", woerterbuch: buch).ergebnis,
+                      "An Thorben Nyström und Thorben Nyström.", "alter und neuer Name gehen beide auf")
+
+    // Neun Hexzeichen sind kein Platzhalter, und Prosa erst recht nicht.
+    Pruefstand.gleich(Rueckweg.analysiere("PERSON_3F9A1C2D9 kam.", woerterbuch: buch).funde.count, 0,
+                      "neun Stellen sind keine Kennung")
+    Pruefstand.gleich(Rueckweg.analysiere("Die Firma Meier und die Firma DEADBEEF GmbH.", woerterbuch: buch).funde.count, 1,
+                      "„Firma Meier\" nicht, „FIRMA DEADBEEF\" ist der Form nach eine")
 }
 
 Pruefstand.pruefe("Zufallskennung: Prosa ist kein Platzhalter") {

@@ -92,13 +92,14 @@ public struct RueckwegErgebnis: Sendable {
 public enum Rueckweg {
 
     /// Das Muster für automatisch vergebene Namen: Kategoriekürzel, dann
-    /// entweder eine Zufallskennung (`PERSON_3F9A1C7B2E4D6A0B5C`) oder, aus
-    /// älteren Texten, eine Nummer mit optionalem Aliasbuchstaben
-    /// (`PERSON_7B`).
+    /// entweder eine Hexkennung (`PERSON_3F9A1C2D`, aus den Versionen 0.2
+    /// bis 0.4 auch achtzehn Stellen) oder, aus älteren Texten, eine Nummer
+    /// mit optionalem Aliasbuchstaben (`PERSON_7B`).
     ///
-    /// Die Kennung verlangt ein Trennzeichen, mindestens zwölf Stellen und
-    /// eine Ziffer darin. Ohne diese Hürde wäre „Firma Meier" ein
-    /// Platzhalter. Die alte Form darf wie bisher `PERSON 3` geschrieben sein.
+    /// Die Kennung verlangt ein Trennzeichen und genau acht oder achtzehn
+    /// Hexzeichen. „Firma Meier" ist damit kein Platzhalter: das E in Meier
+    /// wäre hex, das M und das R nicht. Die alte Form darf wie bisher
+    /// `PERSON 3` geschrieben sein.
     ///
     /// Danach dürfen beliebig viele weitere Abschnitte mit Unterstrich folgen:
     /// der Aliasbuchstabe (`_B`) und von Hand erweiterte Decknamen wie
@@ -110,7 +111,7 @@ public enum Rueckweg {
             .sorted { $0.count > $1.count }
             .joined(separator: "|")
         return "(?<![\\p{L}\\p{N}_])(\(praefixe))"
-            + "(?:[ _\\-](?=[A-Za-z]*\\d)([A-Za-z0-9]{12,})|[ _\\-]?(\\d+[A-Za-z]{0,3}))"
+            + "(?:[ _\\-]([A-Fa-f0-9]{18}|[A-Fa-f0-9]{8})(?![\\p{L}\\p{N}])|[ _\\-]?(\\d+[A-Za-z]{0,3}))"
             + "((?:_[\\p{L}\\p{N}]+)*)(?![\\p{L}\\p{N}_])"
     }
 
