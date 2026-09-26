@@ -63,10 +63,13 @@ enum Bestandsbericht {
             print("  \(gruppe.kategorie.anzeigepfad): \(gruppe.eintraege.count)"
                 + (automatisch > 0 ? " (davon \(automatisch) automatisch erkannt)" : ""))
         }
-        // Die höchste vergebene Nummer verrät, wie viele Einträge es einmal
-        // gab: Nummern werden nach dem Löschen nicht neu vergeben.
-        if let hoechste = buch.eintraege.map(\.nummer).max() {
-            print("  Höchste vergebene Nummer: \(hoechste)")
+        // Seit den Kennungen gibt es keine Nummern mehr. Was noch eine trägt,
+        // stammt aus der Zeit davor und lässt sich in den Einstellungen neu
+        // ableiten.
+        let mitNummer = buch.eintraege.filter { $0.nummer > 0 }.count
+        if mitNummer > 0 {
+            print("  Einträge mit alter Nummer statt Kennung: \(mitNummer)")
         }
+        print("  Seed-Fingerabdruck: \(Decknamen.fingerabdruck(buch.seed)) …")
     }
 }

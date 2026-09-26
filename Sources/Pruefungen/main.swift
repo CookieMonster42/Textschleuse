@@ -2026,4 +2026,10 @@ Pruefstand.pruefe("Eigener Typ: zurechtgebogen, vorn am Decknamen, zurückdrehba
     Pruefstand.gleich(gelesen?.platzhalter, "BEGRIFF_3F9A1C2D", "ohne Typ das Kürzel der Kategorie")
 }
 
+Pruefstand.pruefe("BIC: Fachkürzel der richtigen Form sind keine") {
+    let funde = Regelwerk.finde(in: "Zahlung per GIROCARD, Meldung an FINTECHS, BIC COBADEFFXXX.")
+        .filter { $0.kategorie == .bic }
+    Pruefstand.gleich(funde.map(\.text), ["COBADEFFXXX"], "nur die echte BIC bleibt")
+}
+
 Pruefstand.bilanzUndEnde()

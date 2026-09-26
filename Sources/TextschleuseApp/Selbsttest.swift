@@ -2317,8 +2317,10 @@ enum Selbsttest {
             }
         }
 
-        // Der Seed steht im Fenster, und ein eingefügter Seed kommt oben an.
-        let buch = Woerterbuch()
+        // Vom Seed steht nur der Fingerabdruck im Fenster; ein übernommener
+        // Seed kommt oben an und leitet die Decknamen neu ab.
+        var buch = Woerterbuch()
+        let nystroem = buch.anlegen(text: "Thorben Nyström", kategorie: .person)
         var gesichert: Woerterbuch?
         let einstellungen = EinstellungenFenster(
             beiKurzbefehlen: {},
@@ -2328,21 +2330,29 @@ enum Selbsttest {
         )
         einstellungen.window?.layoutIfNeeded()
         defer { einstellungen.close() }
-        if einstellungen.seedFeldFuerPruefung().stringValue == buch.seed {
-            print("✓ Einstellungen: der Seed steht im Fenster")
+        let angezeigt = einstellungen.seedFingerabdruckFuerPruefung()
+        if angezeigt.hasPrefix(Decknamen.fingerabdruck(buch.seed)), !angezeigt.contains(buch.seed) {
+            print("✓ Einstellungen: vom Seed steht nur der Fingerabdruck im Fenster")
         } else {
-            print("✗ Einstellungen: im Seed-Feld steht „\(einstellungen.seedFeldFuerPruefung().stringValue)\"")
+            print("✗ Einstellungen: im Fenster steht „\(angezeigt)\"")
             fehler += 1
         }
+        let alterName = nystroem.platzhalter
         einstellungen.setzeSeedFuerPruefung("  GEMEINSAMER-SEED-VON-DRUEBEN  ")
         if gesichert?.seed == "GEMEINSAMER-SEED-VON-DRUEBEN" {
-            print("✓ Einstellungen: ein eingefügter Seed wird gesichert")
+            print("✓ Einstellungen: ein übernommener Seed wird gesichert")
         } else {
             print("✗ Einstellungen: der Seed kam nicht an (\(gesichert?.seed ?? "nichts"))")
             fehler += 1
         }
-        einstellungen.setzeSeedFuerPruefung("")
-        if gesichert?.seed == "GEMEINSAMER-SEED-VON-DRUEBEN" {
+        let neuerName = gesichert?.eintrag(mitId: nystroem.id)?.platzhalter ?? ""
+        if neuerName != alterName, gesichert?.klartext(fuerPlatzhalter: alterName) == "Thorben Nyström" {
+            print("✓ Einstellungen: der Wechsel leitet neu ab, der alte Deckname bleibt auflösbar")
+        } else {
+            print("✗ Einstellungen: nach dem Wechsel heißt der Eintrag „\(neuerName)\" (vorher „\(alterName)\")")
+            fehler += 1
+        }
+        if einstellungen.setzeSeedFuerPruefung("") == false, gesichert?.seed == "GEMEINSAMER-SEED-VON-DRUEBEN" {
             print("✓ Einstellungen: ein leerer Seed wird abgelehnt")
         } else {
             print("✗ Einstellungen: ein leerer Seed ging durch")

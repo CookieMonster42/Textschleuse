@@ -111,11 +111,18 @@ public struct BicRegel: Regel {
         "LV", "LT", "CY", "MT", "IS",
     ]
 
+    /// Wörter, die der Form nach eine BIC sind, aber keine: acht Großbuchstaben
+    /// mit einem Ländercode an fünfter und sechster Stelle. GIROCARD trägt
+    /// „CA", FINTECHS „CH", SWIFTGBP „GB".
+    static let ausschluss: Set<String> = [
+        "GIROCARD", "FINTECHS", "SWIFTGBP", "SWIFTCHF", "KONTOKARTE", "BANKKARTE",
+    ]
+
     public func finde(in text: NSString) -> [Fund] {
         RegexWerkzeug.treffer(Self.muster, in: text).compactMap { treffer in
             let roh = text.substring(with: treffer.range)
             let land = String(roh.dropFirst(4).prefix(2))
-            guard Self.laendercodes.contains(land) else { return nil }
+            guard Self.laendercodes.contains(land), !Self.ausschluss.contains(roh) else { return nil }
             return Fund(
                 bereich: treffer.range,
                 text: roh,
