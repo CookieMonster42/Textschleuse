@@ -78,13 +78,14 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
     private var kategorieKnoepfe: [NSButton] = []
     private var verwerfenKnopf = NSButton()
     private var gruppeKnopf = NSButton()
+    private var typKnopf = NSButton()
     private var zurueckKnopf = NSButton()
     private var vorKnopf = NSButton()
     private var kopierenKnopf = NSButton()
     /// Die Knöpfe, die eine ausgewählte Fundstelle brauchen. Kopieren, Leeren
     /// oder Suchen gehören nicht dazu — die gehen immer.
     private var stellenKnoepfe: [NSButton] {
-        kategorieKnoepfe + [verwerfenKnopf, gruppeKnopf, zurueckKnopf, vorKnopf]
+        kategorieKnoepfe + [verwerfenKnopf, gruppeKnopf, typKnopf, zurueckKnopf, vorKnopf]
     }
     private let originalFeld = NSTextField()
     private let originalEtikett = NSTextField(labelWithString: "Original")
@@ -256,6 +257,12 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
             ziel: self, aktion: #selector(gruppeGeklickt),
             hilfe: "Als weitere Schreibweise an einen bekannten Eintrag hängen. "
                 + "D bei markiertem Text, sonst ⌘D."
+        )
+        typKnopf = Knoepfe.knopf(
+            "Eigener Typ …", symbol: "t.square",
+            ziel: self, aktion: #selector(typGeklickt),
+            hilfe: "Ein selbst getippter Typ vorn am Decknamen: aus „Projekt\" wird PROJEKT_…. "
+                + "T bei markiertem Text, sonst ⌘T."
         )
         kategorienLeiste.translatesAutoresizingMaskIntoConstraints = false
         baueKategorieKnoepfe()
@@ -472,7 +479,7 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
         let zusatz = Array(kategorieKnoepfe.dropFirst(Kategorie.schnellwahl.count))
         var teile: [NSView] = feste
         if !zusatz.isEmpty { teile += [Gruppentrenner()] + zusatz }
-        teile += [Gruppentrenner(), verwerfenKnopf, gruppeKnopf]
+        teile += [Gruppentrenner(), typKnopf, verwerfenKnopf, gruppeKnopf]
         kategorienLeiste.setze(teile)
     }
 
@@ -678,6 +685,9 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
             case "d":
                 gruppeUebernehmen()
                 return true
+            case "t":
+                eigenenTypAbfragen()
+                return true
             default:
                 break
             }
@@ -725,8 +735,10 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
         // im Text markiert, oder der Fokus liegt in der Liste. Im dritten Fall
         // — Schreibmarke im Text, nichts markiert — tippt sie eine Ziffer.
         // Ausnahme: der ganze Text ist markiert. Nach ⌘A meint niemand eine
-        // Kategorie — die Ziffer tippt, und der Text ist weg.
-        if textHatFokus, istGanzerTextMarkiert { return false }
+        // Kategorie — die Ziffer tippt, und der Text ist weg. Das gilt auch
+        // aus der Liste heraus: den ganzen Text als Person anzulegen will
+        // niemand.
+        if istGanzerTextMarkiert { return false }
 
         guard textAnsicht.selectedRange().length > 0 || !textHatFokus,
               let zeichen = ereignis.charactersIgnoringModifiers?.lowercased()
@@ -738,6 +750,10 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
         }
         if zeichen == "d" {
             gruppeUebernehmen()
+            return true
+        }
+        if zeichen == "t" {
+            eigenenTypAbfragen()
             return true
         }
         return false
@@ -803,10 +819,43 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
     @objc private func verwerfenGeklickt() { verwerfeAktuellen() }
 
     @objc private func gruppeGeklickt() { gruppeUebernehmen() }
+    @objc private func typGeklickt() { eigenenTypAbfragen() }
+
+    /// Fragt nach einem eigenen Typ und schützt die Markierung oder die
+    /// ausgewählte Fundstelle damit. Die Kategorie bleibt „Sonstiges" bzw.
+    /// die der Fundstelle; der Typ ersetzt nur das Kürzel vorn.
+    private func eigenenTypAbfragen() {
+        guard hatFreieMarkierung || aktuellerFund != nil else { return }
+        let feld = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+        feld.placeholderString = "z. B. Projekt, Produkt, Kunde Nord"
+        feld.stringValue = aktuellerFund?.eigenerTyp ?? ""
+
+        let frage = NSAlert()
+        frage.messageText = "Eigener Typ"
+        frage.informativeText = "Steht vorn am Decknamen statt des Kürzels: aus „Projekt\" wird PROJEKT_…. "
+            + "Großbuchstaben, Ziffern und Unterstrich; Leerzeichen werden zu Unterstrichen."
+        frage.accessoryView = feld
+        frage.window.initialFirstResponder = feld
+        frage.addButton(withTitle: "Schützen")
+        frage.addButton(withTitle: "Abbrechen")
+        guard frage.runModal() == .alertFirstButtonReturn else { return }
+        setzeEigenenTyp(feld.stringValue)
+    }
+
+    /// Schützt mit eigenem Typ. Für die Abfrage, das Markierungsfeld und den
+    /// Selbsttest.
+    func setzeEigenenTyp(_ eingabe: String) {
+        guard let typ = Decknamen.typ(aus: eingabe) else {
+            zeigeMeldung("Ein Typ braucht mindestens einen Buchstaben.")
+            return
+        }
+        let kategorie = hatFreieMarkierung ? .begriff : (aktuellerFund?.kategorie ?? .begriff)
+        setzeKategorie(kategorie, eigenerTyp: typ)
+    }
 
     /// Eine Kategorie zuweisen. Liegt eine eigene Markierung im Text, gilt sie;
     /// sonst die ausgewählte Fundstelle.
-    private func setzeKategorie(_ kategorie: Kategorie) {
+    private func setzeKategorie(_ kategorie: Kategorie, eigenerTyp: String? = nil) {
         zeigeMeldung(nil)
         merkeStand("Kategorie zuweisen")
 
@@ -818,6 +867,7 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
                 bereich: bereich,
                 als: kategorie,
                 merken: merken,
+                eigenerTyp: eigenerTyp,
                 in: &analyse
             ) else {
                 zeigeMeldung("Da ist nichts, was sich schützen ließe.")
@@ -834,7 +884,7 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
 
         guard let fund = aktuellerFund else { return }
         let merken = merkenHaken.state == .on
-        Schleuse.bestaetige(fundId: fund.id, als: kategorie, in: &analyse, merken: merken)
+        Schleuse.bestaetige(fundId: fund.id, als: kategorie, in: &analyse, merken: merken, eigenerTyp: eigenerTyp)
         aktualisiere()
         meldeNachtrag(vorher: vorher, merken: merken)
         uebernimmDecknamen()
@@ -1023,6 +1073,9 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
             case .kategorie(let kategorie, let merken):
                 self.merkenHaken.state = merken ? .on : .off
                 self.setzeKategorie(kategorie)
+            case .eigenerTyp(let eingabe, let merken):
+                self.merkenHaken.state = merken ? .on : .off
+                self.setzeEigenenTyp(eingabe)
             case .gehoertZu:
                 self.gruppeUebernehmen()
             }
@@ -1079,6 +1132,7 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
     @objc func aktionKopierenUndMerken(_ absender: Any?) { uebernehmen(merken: true) }
     @objc func aktionVerwerfen(_ absender: Any?) { verwerfeAktuellen() }
     @objc func aktionZuordnen(_ absender: Any?) { gruppeUebernehmen() }
+    @objc func aktionEigenerTyp(_ absender: Any?) { eigenenTypAbfragen() }
     @objc func aktionLeeren(_ absender: Any?) { leeren() }
     @objc func aktionNeuerText(_ absender: Any?) { neuEinlesen() }
     @objc func aktionDecknamenUmschalten(_ absender: Any?) { vorschauUmschalten() }
@@ -1093,6 +1147,8 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
             return aktuellerFund != nil || hatFreieMarkierung
         case #selector(aktionVerwerfen(_:)):
             return aktuellerFund != nil
+        case #selector(aktionEigenerTyp(_:)):
+            return aktuellerFund != nil || hatFreieMarkierung
         case #selector(aktionZuordnen(_:)):
             return (aktuellerFund != nil || hatFreieMarkierung) && !analyse.woerterbuch.eintraege.isEmpty
         case #selector(aktionNaechsteFundstelle(_:)), #selector(aktionVorigeFundstelle(_:)):
@@ -1189,6 +1245,7 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
         return verarbeite(ereignis)
     }
     func markiereFuerPruefung(_ bereich: NSRange) { textAnsicht.setSelectedRange(bereich) }
+    func markiereAllesFuerPruefung() { textAnsicht.selectAll(nil) }
     func tasteFuerPruefung(_ zeichen: String) -> Bool {
         guard let ereignis = NSEvent.keyEvent(
             with: .keyDown,

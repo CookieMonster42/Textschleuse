@@ -105,9 +105,13 @@ public enum Rueckweg {
     /// der Aliasbuchstabe (`_B`) und von Hand erweiterte Decknamen wie
     /// `PERSON_1_MEIER_JR`. Ohne die Fortsetzung griff nur `PERSON_1` und
     /// `_MEIER_JR` blieb im zurückgedrehten Text stehen.
-    static var muster: String {
-        let praefixe = Kategorie.allCases
-            .map { NSRegularExpression.escapedPattern(for: $0.praefix) }
+    static var muster: String { muster(zusaetzlich: []) }
+
+    /// Mit selbst getippten Typen dazu: `PROJEKT_3F9A1C2D` aus dem Wörterbuch
+    /// oder aus den Sitzungsplatzhaltern.
+    static func muster(zusaetzlich eigene: Set<String>) -> String {
+        let praefixe = (Kategorie.allCases.map(\.praefix) + eigene)
+            .map { NSRegularExpression.escapedPattern(for: $0) }
             .sorted { $0.count > $1.count }
             .joined(separator: "|")
         return "(?<![\\p{L}\\p{N}_])(\(praefixe))"
@@ -141,6 +145,16 @@ public enum Rueckweg {
         let nsText = text as NSString
         var funde: [PlatzhalterFund] = []
 
+        // Eigene Typen aus dem Wörterbuch und aus den Sitzungsplatzhaltern
+        // (`PROJEKT_3F9A1C2D` → „PROJEKT").
+        var eigenePraefixe = woerterbuch.eigeneTypen
+        for name in unbekannte.keys {
+            if let bereich = name.range(of: "_(?:[0-9]+|[A-F0-9]{8}|[A-F0-9]{18})$", options: .regularExpression) {
+                eigenePraefixe.insert(String(name[..<bereich.lowerBound]))
+            }
+        }
+        let muster = muster(zusaetzlich: eigenePraefixe)
+
         for treffer in RegexWerkzeug.treffer(muster, in: nsText, optionen: [.caseInsensitive]) {
             let praefix = nsText.substring(with: treffer.range(at: 1)).uppercased()
             // Gruppe 2 ist die Zufallskennung, Gruppe 3 die alte Nummer samt
@@ -163,9 +177,11 @@ public enum Rueckweg {
             ))
         }
 
-        // Selbst vergebene Namen zusätzlich suchen. Was das Kategoriemuster
-        // schon erwischt hat, fällt hinterher über die Überschneidung raus.
-        let eigene = woerterbuch.alleDecknamen.filter { name in
+        // Selbst vergebene Namen zusätzlich suchen — aus dem Wörterbuch und
+        // aus den Sitzungsplatzhaltern, die jemand umbenannt hat. Was das
+        // Kategoriemuster schon erwischt hat, fällt hinterher über die
+        // Überschneidung raus.
+        let eigene = woerterbuch.alleDecknamen.union(unbekannte.keys).filter { name in
             RegexWerkzeug.treffer(muster, in: name as NSString).isEmpty
         }
         if let eigenesMuster = musterFuerEigene(Array(eigene)) {

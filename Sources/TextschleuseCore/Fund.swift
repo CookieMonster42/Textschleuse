@@ -33,6 +33,9 @@ public struct Fund: Identifiable, Sendable {
     public var verworfen: Bool
     /// Vom Benutzer bestätigt: wird echt ersetzt statt als `UNBEKANNT_n`.
     public var bestaetigt: Bool
+    /// Selbst getippter Typ vorn am Platzhalter, siehe `Eintrag.eigenerTyp`.
+    /// Steht auch am Fund, damit er eine Neuprüfung des Texts übersteht.
+    public var eigenerTyp: String?
 
     public init(
         id: UUID = UUID(),
@@ -45,8 +48,10 @@ public struct Fund: Identifiable, Sendable {
         platzhalter: String = "",
         gruppenVorschlag: UUID? = nil,
         verworfen: Bool = false,
-        bestaetigt: Bool = false
+        bestaetigt: Bool = false,
+        eigenerTyp: String? = nil
     ) {
+        self.eigenerTyp = eigenerTyp
         self.id = id
         self.bereich = bereich
         self.text = text

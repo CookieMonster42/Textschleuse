@@ -38,6 +38,11 @@ public struct Eintrag: Codable, Identifiable, Hashable, Sendable {
     /// gesetzt, gilt er überall statt der automatischen Nummer.
     public var eigenerDeckname: String?
 
+    /// Selbst getippter Typ statt des Kategoriekürzels: `PROJEKT_3F9A1C2D`
+    /// statt `BEGRIFF_3F9A1C2D`. Die Kategorie bleibt gesetzt, damit die
+    /// Listen weiter sortieren können; der Typ ersetzt nur das Kürzel vorn.
+    public var eigenerTyp: String?
+
     /// Alle Decknamen, unter denen dieser Eintrag schon einmal im Umlauf war.
     /// Sie bleiben auflösbar, sonst ließe sich eine Antwort auf eine ältere
     /// Mail nach dem Umbenennen nicht mehr zurückdrehen.
@@ -53,12 +58,14 @@ public struct Eintrag: Codable, Identifiable, Hashable, Sendable {
         automatischErkannt: Bool = false,
         angelegt: Date = Date(),
         eigenerDeckname: String? = nil,
+        eigenerTyp: String? = nil,
         fruehereDecknamen: [String] = []
     ) {
         self.id = id
         self.text = text
         self.kategorie = kategorie
         self.nummer = nummer
+        self.eigenerTyp = eigenerTyp
         // Eine Nummer ohne Kennung ist der alte Weg: dann heißt der Eintrag
         // weiter `PERSON_7`.
         self.kennung = kennung
@@ -86,12 +93,16 @@ public struct Eintrag: Codable, Identifiable, Hashable, Sendable {
         automatischErkannt = try behaelter.decodeIfPresent(Bool.self, forKey: .automatischErkannt) ?? false
         angelegt = try behaelter.decodeIfPresent(Date.self, forKey: .angelegt) ?? Date()
         eigenerDeckname = try behaelter.decodeIfPresent(String.self, forKey: .eigenerDeckname)
+        eigenerTyp = try behaelter.decodeIfPresent(String.self, forKey: .eigenerTyp)
         fruehereDecknamen = try behaelter.decodeIfPresent([String].self, forKey: .fruehereDecknamen) ?? []
     }
 
+    /// Was vorn steht: der eigene Typ, sonst das Kürzel der Kategorie.
+    public var praefix: String { eigenerTyp ?? kategorie.praefix }
+
     /// Der automatisch vergebene Name. Bleibt auch nach dem Umbenennen
     /// erhalten, damit die Kennung nicht neu vergeben wird.
-    public var standardDeckname: String { "\(kategorie.praefix)_\(kennung)" }
+    public var standardDeckname: String { "\(praefix)_\(kennung)" }
 
     public var platzhalter: String { eigenerDeckname ?? standardDeckname }
 
@@ -267,16 +278,38 @@ public struct Woerterbuch: Codable, Sendable {
     public mutating func anlegen(
         text: String,
         kategorie: Kategorie,
-        automatischErkannt: Bool = false
+        automatischErkannt: Bool = false,
+        eigenerTyp: String? = nil
     ) -> Eintrag {
         let eintrag = Eintrag(
             text: text,
             kategorie: kategorie,
             kennung: freieKennung(fuer: text, kategorie: kategorie),
-            automatischErkannt: automatischErkannt
+            automatischErkannt: automatischErkannt,
+            eigenerTyp: eigenerTyp
         )
         eintraege.append(eintrag)
         return eintrag
+    }
+
+    /// Setzt oder löscht den eigenen Typ eines Eintrags. Der bisherige
+    /// Deckname bleibt als früherer auflösbar.
+    public mutating func setzeTyp(_ eintragId: UUID, auf typ: String?) {
+        guard let index = eintraege.firstIndex(where: { $0.id == eintragId }),
+              eintraege[index].eigenerTyp != typ
+        else { return }
+        let bisher = eintraege[index].platzhalter
+        eintraege[index].eigenerTyp = typ
+        if eintraege[index].platzhalter != bisher,
+           !eintraege[index].fruehereDecknamen.contains(bisher) {
+            eintraege[index].fruehereDecknamen.append(bisher)
+        }
+    }
+
+    /// Alle selbst getippten Typen, die im Wörterbuch vorkommen. Der Rückweg
+    /// braucht sie, weil sie in keiner Kategorie stehen.
+    public var eigeneTypen: Set<String> {
+        Set(eintraege.compactMap(\.eigenerTyp))
     }
 
     /// Die Kennung für einen Wortlaut: aus dem Seed abgeleitet, und nur

@@ -294,16 +294,14 @@ final class Steuerung: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menue.delegate = self
         menue.addItem(.separator())
 
-        let mitTaste: [(String, String, NSEvent.ModifierFlags)] = [
-            ("Verwerfen", "aktionVerwerfen:", []),
-            ("Gehört zu …", "aktionZuordnen:", [.command]),
+        let mitTaste: [(String, String, String)] = [
+            ("Verwerfen", "aktionVerwerfen:", ""),
+            ("Gehört zu …", "aktionZuordnen:", "d"),
+            ("Eigener Typ …", "aktionEigenerTyp:", "t"),
         ]
-        for (titel, name, zusatz) in mitTaste {
-            let eintrag = menue.addItem(withTitle: titel, action: Selector((name)), keyEquivalent: "")
-            if name == "aktionZuordnen:" {
-                eintrag.keyEquivalent = "d"
-                eintrag.keyEquivalentModifierMask = zusatz
-            }
+        for (titel, name, taste) in mitTaste {
+            let eintrag = menue.addItem(withTitle: titel, action: Selector((name)), keyEquivalent: taste)
+            eintrag.keyEquivalentModifierMask = [.command]
         }
         menue.addItem(.separator())
 

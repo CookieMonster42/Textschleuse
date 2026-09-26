@@ -34,6 +34,7 @@ enum Tastenkuerzel {
                 Zeile(tasten: ["1", "…", "5"], wirkung: "Markierung schützen als Person, Firma, Ort, Nummer, Sonstiges"),
                 Zeile(tasten: ["6", "7", "8"], wirkung: "als Kunde, Dienstleister, Tool"),
                 Zeile(tasten: ["D"], wirkung: "gehört zu einem bekannten Eintrag"),
+                Zeile(tasten: ["T"], wirkung: "eigener Typ vorn am Decknamen (PROJEKT_…)"),
                 Zeile(tasten: ["⌫"], wirkung: "verwerfen, bleibt Klartext (in der Liste)"),
                 Zeile(tasten: ["↑", "↓"], wirkung: "vorige / nächste Fundstelle (in der Liste)"),
                 Zeile(tasten: ["⌥↑", "⌥↓"], wirkung: "dasselbe, auch aus dem Text heraus"),
