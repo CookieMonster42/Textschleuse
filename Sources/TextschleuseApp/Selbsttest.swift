@@ -55,6 +55,7 @@ enum Selbsttest {
         fehler += pruefeTastenkuerzelBlatt()
         fehler += pruefeExport()
         fehler += pruefeErsetzen()
+        fehler += pruefeEigenerTyp()
 
         print("")
         print(fehler == 0 ? "Alles in Ordnung." : "\(fehler) Punkt(e) fehlgeschlagen.")
@@ -951,7 +952,8 @@ enum Selbsttest {
 
         // Ganzer Text markiert (⌘A): dann tippt die Ziffer, und der Text
         // wird nicht als Person angelegt.
-        ansicht.markiereFuerPruefung(NSRange(location: 0, length: (ansicht.analyse.original as NSString).length))
+        ansicht.fokussiereTextFuerPruefung()
+        ansicht.markiereAllesFuerPruefung()
         let vorher = ansicht.analyse.woerterbuch.eintraege.count
         if ansicht.tasteFuerPruefung("2") == false, ansicht.analyse.woerterbuch.eintraege.count == vorher {
             print("✓ Ziffern: nach ⌘A tippt die Ziffer, keine Kategorie")
@@ -1048,6 +1050,56 @@ enum Selbsttest {
             print("✓ Ersetzen: im Rückweg bleibt die Ersatzzeile verborgen")
         } else {
             print("✗ Ersetzen: der Rückweg zeigt eine Ersatzzeile")
+            fehler += 1
+        }
+        return fehler
+    }
+
+    /// Ein selbst getippter Typ steht vorn am Decknamen.
+    private static func pruefeEigenerTyp() -> Int {
+        var fehler = 0
+        let text = "Das Projekt Nordlicht startet, Nordlicht ist groß."
+        let ansicht = SchutzAnsicht(analyse: Schleuse.analysiere(text, woerterbuch: Woerterbuch()))
+        let fenster = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1000, height: 640),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        fenster.contentView = ansicht
+        fenster.makeKeyAndOrderFront(nil)
+        fenster.layoutIfNeeded()
+        defer { fenster.orderOut(nil) }
+
+        ansicht.fokussiereTextFuerPruefung()
+        ansicht.markiereFuerPruefung((text as NSString).range(of: "Nordlicht"))
+        ansicht.setzeEigenenTyp("Projekt Nord")
+        let eintrag = ansicht.analyse.woerterbuch.eintrag(fuerText: "Nordlicht")
+        if eintrag?.eigenerTyp == "PROJEKT_NORD", eintrag?.platzhalter.hasPrefix("PROJEKT_NORD_") == true {
+            print("✓ Eigener Typ: „Projekt Nord\" wird zu PROJEKT_NORD_…")
+        } else {
+            print("✗ Eigener Typ: Eintrag \(eintrag?.platzhalter ?? "fehlt"), Typ \(eintrag?.eigenerTyp ?? "keiner")")
+            fehler += 1
+        }
+        let geschuetzt = Schleuse.geschuetzterText(ansicht.analyse)
+        if geschuetzt.components(separatedBy: "PROJEKT_NORD_").count == 3 {
+            print("✓ Eigener Typ: beide Stellen im Text tragen den Typ")
+        } else {
+            print("✗ Eigener Typ: im Text steht „\(geschuetzt)\"")
+            fehler += 1
+        }
+        if knoepfeSammeln(in: ansicht).contains(where: { $0.title == "Eigener Typ …" }) {
+            print("✓ Eigener Typ: der Knopf steht in der Leiste")
+        } else {
+            print("✗ Eigener Typ: kein Knopf in der Leiste")
+            fehler += 1
+        }
+        let feld = MarkierungsPopover(begriff: "x", kategorien: Kategorie.schnellwahl, kannZuordnen: false) { _ in }
+        feld.loadView()
+        if feld.hatTypFeld {
+            print("✓ Eigener Typ: das Markierungsfeld hat ein Feld dafür")
+        } else {
+            print("✗ Eigener Typ: im Markierungsfeld fehlt das Feld")
             fehler += 1
         }
         return fehler

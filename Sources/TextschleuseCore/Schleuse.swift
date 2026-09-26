@@ -140,21 +140,38 @@ public enum Schleuse {
         fundId: UUID,
         als kategorie: Kategorie,
         in analyse: inout Analyse,
-        merken: Bool = true
+        merken: Bool = true,
+        eigenerTyp: String? = nil
     ) {
         guard let index = analyse.funde.firstIndex(where: { $0.id == fundId }) else { return }
         let text = analyse.funde[index].text
 
         let eintrag: Eintrag
         if let vorhanden = analyse.woerterbuch.eintrag(fuerText: text) {
-            eintrag = vorhanden
+            if let eigenerTyp {
+                analyse.woerterbuch.setzeTyp(vorhanden.id, auf: eigenerTyp)
+            }
+            eintrag = analyse.woerterbuch.eintrag(mitId: vorhanden.id) ?? vorhanden
         } else if merken {
-            eintrag = analyse.woerterbuch.anlegen(text: text, kategorie: kategorie)
+            eintrag = analyse.woerterbuch.anlegen(text: text, kategorie: kategorie, eigenerTyp: eigenerTyp)
         } else {
             // Nicht merken heißt: echter Platzhalter, aber nur für diesen Text.
-            analyse.funde[index].kategorie = kategorie
-            analyse.funde[index].bestaetigt = true
-            analyse.funde[index].sicherheit = .sicher
+            let gesucht = text.lowercased()
+            let neuerPlatzhalter = eigenerTyp.map { typ in
+                freierPlatzhalter(praefix: typ, kategorie: kategorie, text: text, in: analyse)
+            }
+            for weiterer in analyse.funde.indices where analyse.funde[weiterer].text.lowercased() == gesucht {
+                analyse.funde[weiterer].kategorie = kategorie
+                analyse.funde[weiterer].bestaetigt = true
+                analyse.funde[weiterer].sicherheit = .sicher
+                if let neuerPlatzhalter {
+                    let alt = analyse.funde[weiterer].platzhalter
+                    analyse.unbekannte.removeValue(forKey: alt)
+                    analyse.funde[weiterer].platzhalter = neuerPlatzhalter
+                    analyse.funde[weiterer].eigenerTyp = eigenerTyp
+                    analyse.unbekannte[neuerPlatzhalter] = analyse.funde[weiterer].text
+                }
+            }
             return
         }
 
@@ -283,6 +300,7 @@ public enum Schleuse {
                     bereich: treffer,
                     als: alter.kategorie,
                     merken: false,
+                    eigenerTyp: alter.eigenerTyp,
                     in: &neue
                 )
                 suchab = NSMaxRange(treffer)
@@ -309,6 +327,7 @@ public enum Schleuse {
         bereich: NSRange,
         als kategorie: Kategorie,
         merken: Bool,
+        eigenerTyp: String? = nil,
         in analyse: inout Analyse
     ) -> UUID? {
         let nsText = analyse.original as NSString
@@ -331,17 +350,24 @@ public enum Schleuse {
             text: text,
             kategorie: kategorie,
             sicherheit: .sicher,
-            quelle: .markierung
+            quelle: .markierung,
+            eigenerTyp: eigenerTyp
         )
         fund.bestaetigt = true
 
         if merken {
-            let eintrag = analyse.woerterbuch.eintrag(fuerText: text)
-                ?? analyse.woerterbuch.anlegen(text: text, kategorie: kategorie)
+            var eintrag = analyse.woerterbuch.eintrag(fuerText: text)
+                ?? analyse.woerterbuch.anlegen(text: text, kategorie: kategorie, eigenerTyp: eigenerTyp)
+            if let eigenerTyp, eintrag.eigenerTyp != eigenerTyp {
+                analyse.woerterbuch.setzeTyp(eintrag.id, auf: eigenerTyp)
+                eintrag = analyse.woerterbuch.eintrag(mitId: eintrag.id) ?? eintrag
+            }
             fund.eintragId = eintrag.id
             fund.platzhalter = eintrag.platzhalter
         } else {
-            fund.platzhalter = freierPlatzhalter(fuer: kategorie, text: text, in: analyse)
+            fund.platzhalter = freierPlatzhalter(
+                praefix: eigenerTyp ?? kategorie.praefix, kategorie: kategorie, text: text, in: analyse
+            )
             analyse.unbekannte[fund.platzhalter] = text
         }
 
@@ -441,10 +467,22 @@ public enum Schleuse {
     /// Ein Platzhalter, der in diesem Text noch frei ist. Für Markierungen, die
     /// nicht ins Wörterbuch sollen, und für die Unbekannten.
     private static func freierPlatzhalter(fuer kategorie: Kategorie, text: String, in analyse: Analyse) -> String {
+        freierPlatzhalter(praefix: kategorie.praefix, kategorie: kategorie, text: text, in: analyse)
+    }
+
+    /// Mit eigenem Präfix: `PROJEKT_…` statt `BEGRIFF_…`.
+    private static func freierPlatzhalter(
+        praefix: String,
+        kategorie: Kategorie,
+        text: String,
+        in analyse: Analyse
+    ) -> String {
         let belegt = Set(analyse.funde.map(\.platzhalter))
             .union(analyse.unbekannte.keys)
             .union(analyse.woerterbuch.alleDecknamen)
-        return freierPlatzhalter(fuer: kategorie, text: text, seed: analyse.woerterbuch.seed, belegt: belegt)
+        return freierPlatzhalter(
+            praefix: praefix, kategorie: kategorie, text: text, seed: analyse.woerterbuch.seed, belegt: belegt
+        )
     }
 
     private static func freierPlatzhalter(
@@ -453,8 +491,18 @@ public enum Schleuse {
         seed: String,
         belegt: Set<String>
     ) -> String {
+        freierPlatzhalter(praefix: kategorie.praefix, kategorie: kategorie, text: text, seed: seed, belegt: belegt)
+    }
+
+    private static func freierPlatzhalter(
+        praefix: String,
+        kategorie: Kategorie,
+        text: String,
+        seed: String,
+        belegt: Set<String>
+    ) -> String {
         let kennung = Decknamen.kennung(fuer: text, kategorie: kategorie, seed: seed, belegt: belegt)
-        return "\(kategorie.praefix)_\(kennung)"
+        return "\(praefix)_\(kennung)"
     }
 
     private static func uebernimmFuerGleichlautende(

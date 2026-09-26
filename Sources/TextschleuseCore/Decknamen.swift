@@ -77,6 +77,31 @@ public enum Decknamen {
             .joined(separator: " ")
     }
 
+    /// Ein selbst getippter Typ, zurechtgebogen: „Projekt Nord" wird zu
+    /// `PROJEKT_NORD`. Großbuchstaben, Ziffern, Unterstrich, höchstens 40
+    /// Stellen. Ohne einen Buchstaben gibt es keinen Typ — `_1_` sagt nichts.
+    public static let hoechstlaengeTyp = 40
+
+    public static func typ(aus eingabe: String) -> String? {
+        let flach = eingabe
+            .folding(options: [.diacriticInsensitive], locale: Locale(identifier: "de_DE"))
+            .uppercased()
+        var ergebnis = ""
+        var letztesWarStrich = true
+        for zeichen in flach {
+            if zeichen.isASCII, zeichen.isLetter || zeichen.isNumber {
+                ergebnis.append(zeichen)
+                letztesWarStrich = false
+            } else if !letztesWarStrich {
+                ergebnis.append("_")
+                letztesWarStrich = true
+            }
+        }
+        while ergebnis.hasSuffix("_") { ergebnis.removeLast() }
+        guard ergebnis.contains(where: \.isLetter) else { return nil }
+        return String(ergebnis.prefix(hoechstlaengeTyp))
+    }
+
     /// Ein frischer Seed: 256 Bit aus dem Systemzufall, als 64 Hexzeichen.
     /// Ältere Seeds mit 32 Stellen bleiben gültig — der Seed ist eine
     /// Zeichenkette, jede Länge tut.

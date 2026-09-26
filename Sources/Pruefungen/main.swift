@@ -1978,4 +1978,52 @@ Pruefstand.pruefe("Unterkategorien: Kunde, Dienstleister, Tool hängen an Firma"
                       "Von Zwickel GmbH geliefert.", "Rückweg löst DIENSTLEISTER_… auf")
 }
 
+// MARK: Eigener Typ
+
+Pruefstand.pruefe("Eigener Typ: zurechtgebogen, vorn am Decknamen, zurückdrehbar") {
+    Pruefstand.gleich(Decknamen.typ(aus: "projekt"), "PROJEKT", "klein wird groß")
+    Pruefstand.gleich(Decknamen.typ(aus: "  Kunde Nord  "), "KUNDE_NORD", "Leerzeichen werden Unterstrich")
+    Pruefstand.gleich(Decknamen.typ(aus: "Ärzte-Haus 2"), "ARZTE_HAUS_2", "Umlaut und Bindestrich")
+    Pruefstand.gleich(Decknamen.typ(aus: "__1__"), nil, "ohne Buchstaben kein Typ")
+    Pruefstand.gleich(Decknamen.typ(aus: String(repeating: "A", count: 60))?.count, 40, "höchstens 40")
+
+    var analyse = Schleuse.analysiere("Das Projekt Nordlicht startet. Nordlicht ist groß.", woerterbuch: Woerterbuch())
+    let kennung = Schleuse.markiere(
+        bereich: (analyse.original as NSString).range(of: "Nordlicht"),
+        als: .begriff, merken: true, eigenerTyp: "PROJEKT", in: &analyse
+    )
+    Pruefstand.wahr(kennung != nil, "Markierung angenommen")
+    let eintrag = analyse.woerterbuch.eintrag(fuerText: "Nordlicht")
+    Pruefstand.gleich(eintrag?.eigenerTyp, "PROJEKT", "Typ am Eintrag")
+    Pruefstand.gleich(eintrag?.kategorie, .begriff, "Kategorie bleibt Sonstiges")
+    Pruefstand.wahr(eintrag?.platzhalter.hasPrefix("PROJEKT_") == true, "Deckname beginnt mit PROJEKT_")
+    let geschuetzt = Schleuse.geschuetzterText(analyse)
+    Pruefstand.gleich(geschuetzt.components(separatedBy: "PROJEKT_").count, 3, "beide Stellen ersetzt")
+    Pruefstand.gleich(Rueckweg.analysiere(geschuetzt, woerterbuch: analyse.woerterbuch).ergebnis, analyse.original,
+                      "der Rückweg kennt den eigenen Typ")
+
+    // Nur für diesen Text: der Platzhalter lebt in den Sitzungsplatzhaltern.
+    var fluechtig = Schleuse.analysiere("Codename Falke fliegt.", woerterbuch: Woerterbuch())
+    _ = Schleuse.markiere(
+        bereich: (fluechtig.original as NSString).range(of: "Falke"),
+        als: .begriff, merken: false, eigenerTyp: "CODENAME", in: &fluechtig
+    )
+    let fluechtigGeschuetzt = Schleuse.geschuetzterText(fluechtig)
+    Pruefstand.enthaelt(fluechtigGeschuetzt, "CODENAME_", "Typ auch ohne Wörterbuch")
+    Pruefstand.gleich(
+        Rueckweg.analysiere(fluechtigGeschuetzt, woerterbuch: fluechtig.woerterbuch, unbekannte: fluechtig.unbekannte).ergebnis,
+        fluechtig.original, "Rückweg über die Sitzungsplatzhalter"
+    )
+
+    // Eine Neuprüfung nach dem Tippen behält den Typ.
+    let neu = Schleuse.analysiereErneut("Codename Falke fliegt weit.", wie: fluechtig)
+    Pruefstand.wahr(neu.funde.contains { $0.eigenerTyp == "CODENAME" && $0.text == "Falke" },
+                    "der Typ übersteht die Neuprüfung")
+
+    // Alte Dateien ohne das Feld lesen sich weiter.
+    let alt = "{\"id\":\"11111111-1111-1111-1111-111111111111\",\"text\":\"Nordlicht\",\"kategorie\":\"begriff\",\"kennung\":\"3F9A1C2D\"}"
+    let gelesen = try? JSONDecoder().decode(Eintrag.self, from: Data(alt.utf8))
+    Pruefstand.gleich(gelesen?.platzhalter, "BEGRIFF_3F9A1C2D", "ohne Typ das Kürzel der Kategorie")
+}
+
 Pruefstand.bilanzUndEnde()
