@@ -2342,28 +2342,32 @@ enum Selbsttest {
             fehler += 1
         }
 
+        // Die Ziffern 6 bis 8 sind Kunde, Dienstleister, Tool — auch mit
+        // zugeschalteter Erkennung, die bekommt keine Ziffer.
         ansicht.fokussiereTextFuerPruefung()
         ansicht.markiereFuerPruefung((text as NSString).range(of: "Nordlicht"))
         let abgefangen = ansicht.tasteFuerPruefung("6")
         let angelegt = ansicht.analyse.woerterbuch.eintrag(fuerText: "Nordlicht")
-        if abgefangen, angelegt?.kategorie == .website {
-            print("✓ Zusatzkategorien: Taste 6 legt die Markierung als Website an")
+        if abgefangen, angelegt?.kategorie == .kunde {
+            print("✓ Zusatzkategorien: Taste 6 legt die Markierung als Kunde an")
         } else {
-            print("✗ Zusatzkategorien: Taste 6 tut nichts "
-                + "(abgefangen: \(abgefangen), Eintrag: \(angelegt?.kategorie.anzeigename ?? "keiner"))")
+            print("✗ Zusatzkategorien: Taste 6 — abgefangen: \(abgefangen), "
+                + "Eintrag: \(angelegt?.kategorie.anzeigename ?? "keiner")")
+            fehler += 1
+        }
+        if angelegt?.platzhalter.hasPrefix("KUNDE_") == true {
+            print("✓ Zusatzkategorien: der Deckname heißt KUNDE_…")
+        } else {
+            print("✗ Zusatzkategorien: Deckname „\(angelegt?.platzhalter ?? "")\"")
             fehler += 1
         }
 
-        // Ohne zugeschaltete Erkennung bleibt die 6 eine Ziffer.
-        let ohne = SchutzAnsicht(analyse: Schleuse.analysiere(text, woerterbuch: Woerterbuch()))
-        fenster.contentView = ohne
-        fenster.layoutIfNeeded()
-        ohne.fokussiereTextFuerPruefung()
-        ohne.markiereFuerPruefung((text as NSString).range(of: "Nordlicht"))
-        if ohne.tasteFuerPruefung("6") == false {
-            print("✓ Zusatzkategorien: ohne Website-Erkennung ist die 6 keine Kategorie")
+        // Die 9 ist keine Kategorie, auch nicht mit Zusatzregel.
+        ansicht.markiereFuerPruefung((text as NSString).range(of: "Seite"))
+        if ansicht.tasteFuerPruefung("9") == false {
+            print("✓ Zusatzkategorien: die 9 tippt, sie ist keine Kategorie")
         } else {
-            print("✗ Zusatzkategorien: die 6 wird abgefangen, obwohl nichts zugeschaltet ist")
+            print("✗ Zusatzkategorien: die 9 wird als Kategorie verstanden")
             fehler += 1
         }
         return fehler

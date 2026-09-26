@@ -1947,4 +1947,35 @@ Pruefstand.pruefe("Textersatz: alle, ganze Wörter, einzeln") {
                       "leerer Begriff ersetzt nichts")
 }
 
+// MARK: Unterkategorien
+
+Pruefstand.pruefe("Unterkategorien: Kunde, Dienstleister, Tool hängen an Firma") {
+    Pruefstand.gleich(Kategorie.kunde.oberkategorie, .firma, "Kunde ist eine Firma")
+    Pruefstand.gleich(Kategorie.tool.anzeigepfad, "Firma › Tool", "Pfad für die Listen")
+    Pruefstand.gleich(Kategorie.person.anzeigepfad, "Person", "ohne Oberkategorie nur der Name")
+    Pruefstand.gleich(Kategorie.schnellwahl.count, 8, "acht Typen auf den Ziffern")
+    Pruefstand.gleich(Kategorie.taste(fuerPlatz: 5), "6", "Kunde liegt auf der 6")
+    Pruefstand.gleich(Kategorie.taste(fuerPlatz: 8), nil, "hinter der 8 keine Taste")
+    Pruefstand.gleich(Kategorie.platz(fuerTaste: "9"), nil, "die 9 ist kein Platz")
+    Pruefstand.gleich(Kategorie.platz(fuerTaste: "0"), nil, "die 0 auch nicht")
+
+    var buch = Woerterbuch()
+    buch.schalte(.website, an: true)
+    Pruefstand.gleich(Kategorie.zurWahl(mit: buch), Kategorie.schnellwahl + [.website],
+                      "zugeschaltete Erkennungen hinten dran, ohne Ziffer")
+
+    // Die Listen clustern die drei unter Firma.
+    _ = buch.anlegen(text: "Beispielbank Nord eG", kategorie: .firma)
+    _ = buch.anlegen(text: "Zwickel GmbH", kategorie: .dienstleister)
+    _ = buch.anlegen(text: "Thorben Nyström", kategorie: .person)
+    let gruppen = Eintragsliste.gruppiert(buch.eintraege).map(\.kategorie)
+    Pruefstand.gleich(gruppen, [.person, .firma, .dienstleister], "Dienstleister direkt hinter Firma")
+
+    // Und der Rückweg kennt die neuen Kürzel.
+    let dienst = buch.eintraege.first { $0.kategorie == .dienstleister }!
+    Pruefstand.wahr(dienst.platzhalter.hasPrefix("DIENSTLEISTER_"), "Kürzel DIENSTLEISTER")
+    Pruefstand.gleich(Rueckweg.analysiere("Von \(dienst.platzhalter) geliefert.", woerterbuch: buch).ergebnis,
+                      "Von Zwickel GmbH geliefert.", "Rückweg löst DIENSTLEISTER_… auf")
+}
+
 Pruefstand.bilanzUndEnde()

@@ -436,12 +436,8 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
         Kategorie.zurWahl(mit: analyse.woerterbuch)
     }
 
-    /// „1–5", „1–7" oder „1–9 und 0": die Tasten, die gerade Kategorien tragen.
-    private var tastenhinweis: String {
-        let anzahl = kategorienZurWahl.count
-        if anzahl >= 10 { return "1–9 und 0" }
-        return "1–\(anzahl)"
-    }
+    /// „1–8": die Tasten, die Kategorien tragen.
+    private var tastenhinweis: String { "1–\(Kategorie.schnellwahl.count)" }
 
     private func kategorie(fuerTaste zeichen: String) -> Kategorie? {
         guard let platz = Kategorie.platz(fuerTaste: zeichen) else { return nil }
@@ -470,7 +466,14 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
             knopf.tag = platz
             return knopf
         }
-        kategorienLeiste.setze(kategorieKnoepfe + [Gruppentrenner(), verwerfenKnopf, gruppeKnopf])
+        // Feste Typen mit Ziffer, dahinter durch einen Strich getrennt die
+        // zugeschalteten ohne, dann Verwerfen und Zuordnen.
+        let feste = Array(kategorieKnoepfe.prefix(Kategorie.schnellwahl.count))
+        let zusatz = Array(kategorieKnoepfe.dropFirst(Kategorie.schnellwahl.count))
+        var teile: [NSView] = feste
+        if !zusatz.isEmpty { teile += [Gruppentrenner()] + zusatz }
+        teile += [Gruppentrenner(), verwerfenKnopf, gruppeKnopf]
+        kategorienLeiste.setze(teile)
     }
 
     // MARK: Darstellung

@@ -58,7 +58,7 @@ final class EintragEditor: NSView {
         begriffFeld.toolTip = "So steht der Begriff im Text. ⏎ übernimmt."
 
         for kategorie in Kategorie.allCases where kategorie != .unbekannt {
-            kategorieWahl.addItem(withTitle: kategorie.anzeigename)
+            kategorieWahl.addItem(withTitle: kategorie.anzeigepfad)
             kategorieWahl.lastItem?.representedObject = kategorie.rawValue
         }
         kategorieWahl.target = self
@@ -189,7 +189,7 @@ final class EintragEditor: NSView {
             ? "\(neuer.text)  (automatisch erkannt)"
             : neuer.text
         begriffFeld.stringValue = neuer.text
-        kategorieWahl.selectItem(withTitle: neuer.kategorie.anzeigename)
+        kategorieWahl.selectItem(withTitle: neuer.kategorie.anzeigepfad)
         decknameFeld.stringValue = neuer.platzhalter
         zuruecksetzenKnopf.isEnabled = neuer.eigenerDeckname != nil
 

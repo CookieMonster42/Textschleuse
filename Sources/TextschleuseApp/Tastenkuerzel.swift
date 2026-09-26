@@ -32,7 +32,7 @@ enum Tastenkuerzel {
             ]),
             Abschnitt(titel: "Fundstelle beim Schützen", zeilen: [
                 Zeile(tasten: ["1", "…", "5"], wirkung: "Markierung schützen als Person, Firma, Ort, Nummer, Sonstiges"),
-                Zeile(tasten: ["6", "…", "0"], wirkung: "als zugeschaltete Erkennung (Website, Anschrift …)"),
+                Zeile(tasten: ["6", "7", "8"], wirkung: "als Kunde, Dienstleister, Tool"),
                 Zeile(tasten: ["D"], wirkung: "gehört zu einem bekannten Eintrag"),
                 Zeile(tasten: ["⌫"], wirkung: "verwerfen, bleibt Klartext (in der Liste)"),
                 Zeile(tasten: ["↑", "↓"], wirkung: "vorige / nächste Fundstelle (in der Liste)"),
@@ -41,7 +41,7 @@ enum Tastenkuerzel {
                 Zeile(tasten: ["⎋"], wirkung: "im Deckname-Feld: Eingabe verwerfen"),
             ]),
             Abschnitt(titel: "Text", zeilen: [
-                Zeile(tasten: ["⌘F"], wirkung: "im Text suchen"),
+                Zeile(tasten: ["⌘F"], wirkung: "im Text suchen und ersetzen"),
                 Zeile(tasten: ["⌘G", "⇧⌘G"], wirkung: "nächster / voriger Treffer"),
                 Zeile(tasten: ["⌘E"], wirkung: "Decknamen im Text ein- und ausblenden"),
                 Zeile(tasten: ["⌘N"], wirkung: "neuer Text aus der Zwischenablage"),
