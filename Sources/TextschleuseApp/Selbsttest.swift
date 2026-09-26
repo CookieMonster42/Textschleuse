@@ -53,6 +53,7 @@ enum Selbsttest {
         fehler += pruefeChipOhnePolster()
         fehler += pruefeNormalesBearbeiten()
         fehler += pruefeTastenkuerzelBlatt()
+        fehler += pruefeExport()
 
         print("")
         print(fehler == 0 ? "Alles in Ordnung." : "\(fehler) Punkt(e) fehlgeschlagen.")
@@ -416,8 +417,7 @@ enum Selbsttest {
         var gesichert: Woerterbuch?
         let inhalt = WoerterbuchAnsicht(
             woerterbuch: buch,
-            beimSichern: { gesichert = $0 },
-            beimExportieren: { _, _ in }
+            beimSichern: { gesichert = $0 }
         )
         let fenster = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 980, height: 560),
@@ -945,6 +945,65 @@ enum Selbsttest {
         } else {
             print("✗ Ziffern: mit Markierung passiert nichts "
                 + "(abgefangen: \(abgefangen), Eintrag: \(angelegt?.kategorie.anzeigename ?? "keiner"))")
+            fehler += 1
+        }
+
+        // Ganzer Text markiert (⌘A): dann tippt die Ziffer, und der Text
+        // wird nicht als Person angelegt.
+        ansicht.markiereFuerPruefung(NSRange(location: 0, length: (ansicht.analyse.original as NSString).length))
+        let vorher = ansicht.analyse.woerterbuch.eintraege.count
+        if ansicht.tasteFuerPruefung("2") == false, ansicht.analyse.woerterbuch.eintraege.count == vorher {
+            print("✓ Ziffern: nach ⌘A tippt die Ziffer, keine Kategorie")
+        } else {
+            print("✗ Ziffern: nach ⌘A wird die Ziffer als Kategorie verstanden")
+            fehler += 1
+        }
+        return fehler
+    }
+
+    /// Der Klartext-Export muss an jeder Einbaustelle eine Datei hinterlassen.
+    /// Vorher war die Exportfunktion eine durchgereichte Closure, und im
+    /// Hauptfenster und in der Popup-Klappe war sie leer.
+    private static func pruefeExport() -> Int {
+        var fehler = 0
+        let ordner = FileManager.default.temporaryDirectory
+            .appendingPathComponent("textschleuse-selbsttest-export-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: ordner, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: ordner) }
+        let pfadVorher = Einstellungen.gemeinsam.backupPfad
+        defer { Einstellungen.gemeinsam.backupPfad = pfadVorher }
+
+        var buch = Woerterbuch()
+        _ = buch.anlegen(text: "Thorben Nyström", kategorie: .person)
+
+        // Dieselbe Ansicht, wie sie Hauptfenster (schmal) und
+        // Wörterbuchfenster (breit) einbauen.
+        for (name, schmal) in [("Wörterbuchfenster", false), ("Spalte im Hauptfenster", true)] {
+            let ansicht = WoerterbuchAnsicht(woerterbuch: buch, schmal: schmal, beimSichern: { _ in })
+            let ziel = ordner.appendingPathComponent("\(schmal ? "schmal" : "breit").json")
+            do {
+                try ansicht.schreibeExport(nach: ziel)
+                let groesse = (try? FileManager.default.attributesOfItem(atPath: ziel.path)[.size] as? Int) ?? 0
+                let inhalt = (try? String(contentsOf: ziel, encoding: .utf8)) ?? ""
+                if groesse > 0, inhalt.contains("Thorben Nyström") {
+                    print("✓ Export (\(name)): \(groesse) Bytes mit dem Eintrag")
+                } else {
+                    print("✗ Export (\(name)): Datei \(groesse) Bytes, Eintrag \(inhalt.contains("Thorben Nyström") ? "da" : "fehlt")")
+                    fehler += 1
+                }
+            } catch {
+                print("✗ Export (\(name)): \(error.localizedDescription)")
+                fehler += 1
+            }
+        }
+
+        // In einen Ordner, den es nicht gibt: ein Fehler, keine stille Meldung.
+        let ansicht = WoerterbuchAnsicht(woerterbuch: buch, schmal: true, beimSichern: { _ in })
+        let unmoeglich = ordner.appendingPathComponent("gibt-es-nicht/export.json")
+        if (try? ansicht.schreibeExport(nach: unmoeglich)) == nil {
+            print("✓ Export: ein fehlgeschlagener Export wird gemeldet")
+        } else {
+            print("✗ Export: fehlgeschlagener Export gilt als Erfolg")
             fehler += 1
         }
         return fehler

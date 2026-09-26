@@ -613,6 +613,15 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
 
     private var hatFreieMarkierung: Bool { freieMarkierung != nil }
 
+    /// Nach ⌘A ist alles markiert. Dann meint eine Ziffer keine Kategorie,
+    /// sondern ersetzt den Text — wie in jedem anderen Textfeld. Und das
+    /// Markierungsfeld hat bei einem ganzen Text nichts zu fragen.
+    private var istGanzerTextMarkiert: Bool {
+        let auswahl = textAnsicht.selectedRange()
+        let laenge = (textAnsicht.string as NSString).length
+        return laenge > 0 && auswahl.location == 0 && auswahl.length == laenge
+    }
+
     private var textHatFokus: Bool {
         guard let erster = window?.firstResponder else { return false }
         return erster === textAnsicht
@@ -709,6 +718,10 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
         // Zwei Fälle, in denen eine Ziffer die Kategorie meint: es ist etwas
         // im Text markiert, oder der Fokus liegt in der Liste. Im dritten Fall
         // — Schreibmarke im Text, nichts markiert — tippt sie eine Ziffer.
+        // Ausnahme: der ganze Text ist markiert. Nach ⌘A meint niemand eine
+        // Kategorie — die Ziffer tippt, und der Text ist weg.
+        if textHatFokus, istGanzerTextMarkiert { return false }
+
         guard textAnsicht.selectedRange().length > 0 || !textHatFokus,
               let zeichen = ereignis.charactersIgnoringModifiers?.lowercased()
         else { return false }
@@ -956,8 +969,7 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
                 self.analyse.woerterbuch = geaendert
                 self.beiWoerterbuchAenderung?(geaendert)
                 self.aktualisiere()
-            },
-            beimExportieren: { _, _ in }
+            }
         )
         ansicht.translatesAutoresizingMaskIntoConstraints = false
         mitte.addArrangedSubview(ansicht)
@@ -1486,7 +1498,7 @@ extension SchutzAnsicht: NSTextViewDelegate {
         // Das Feldeditor-Textview des Deckname-Felds meldet sich hier auch.
         guard meldung.object as AnyObject? === textAnsicht else { return }
         aktualisiereWerkzeuge()
-        if hatFreieMarkierung {
+        if hatFreieMarkierung, !istGanzerTextMarkiert {
             zeigeMeldung(nil)
             kopfzeile.stringValue = merkenHaken.state == .on
                 ? "Markierung: Taste \(tastenhinweis) legt sie als neuen Eintrag an"

@@ -188,8 +188,7 @@ final class Hauptfenster: NSWindowController {
                 // wurde, gilt ab jetzt auch für den laufenden Text.
                 self.schutzAnsicht.uebernimmWoerterbuch(geaendert)
                 self.rueckwegAnsicht.setze(woerterbuch: geaendert)
-            },
-            beimExportieren: { _, _ in }
+            }
         )
         spalte.translatesAutoresizingMaskIntoConstraints = false
         woerterbuchSpalte = spalte
