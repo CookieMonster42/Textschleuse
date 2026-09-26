@@ -6,9 +6,9 @@ public enum Hinweise {
     /// Geht an das KI-Werkzeug und steht immer über dem Text.
     public static let fuerModell = """
         [Hinweis] Der folgende Text ist anonymisiert. Ausdrücke wie \
-        PERSON_3F9A1C7B2E4D6A0B5C, FIRMA_… oder IBAN_… sind Platzhalter für \
-        echte Namen und Daten. Übernimm sie unverändert, Zeichen für Zeichen, \
-        und schreibe sie nicht aus.
+        PERSON_3F9A1C2D, FIRMA_… oder IBAN_… sind Platzhalter für echte Namen \
+        und Daten. Übernimm sie unverändert, Zeichen für Zeichen, und schreibe \
+        sie nicht aus.
         """
 
     /// Geht an dich und steht nur da, wenn tatsächlich Ungeprüftes im Text ist.

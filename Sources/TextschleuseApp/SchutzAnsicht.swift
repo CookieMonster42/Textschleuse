@@ -273,7 +273,7 @@ final class SchutzAnsicht: NSView, NSUserInterfaceValidations {
         originalFeld.toolTip = "Korrigiert, was an dieser Stelle im Text steht. ⏎ übernimmt, ⎋ verwirft."
 
         decknameFeld.font = .monospacedSystemFont(ofSize: 13, weight: .medium)
-        decknameFeld.placeholderString = "PERSON_3F9A1C7B2E4D6A0B5C"
+        decknameFeld.placeholderString = "PERSON_3F9A1C2D"
         decknameFeld.target = self
         decknameFeld.action = #selector(decknameUebernehmen)
         decknameFeld.delegate = self
