@@ -5,7 +5,7 @@ ein KI-Tool geht — und dreht die Antwort wieder zurück. Läuft komplett auf
 dem eigenen Mac, es geht nichts ins Netz.
 
 Aus `Sehr geehrter Herr Nyström, Ihre IBAN DE89 … stimmt.` wird
-`Sehr geehrter Herr PERSON_3F9A1C7B2E4D6A0B5C, Ihre IBAN IBAN_A41C… stimmt.`
+`Sehr geehrter Herr PERSON_3F9A1C2D, Ihre IBAN IBAN_A41C0E77 stimmt.`
 Die Kennung hinter dem Kürzel wird aus einem geheimen Seed und dem Namen
 abgeleitet. Ohne den Seed sieht sie aus wie Zufall — weder Anzahl noch
 Reihenfolge der Einträge lassen sich ablesen, und aus der Kennung nicht der
@@ -33,8 +33,10 @@ Silicon.
 Text kopieren, `⌃⌥⌘S` drücken. Das Popup zeigt jede Fundstelle: Grün ist
 sicher erkannt (IBAN, E-Mail, Telefon, Wörterbuch), Rot ist eine Vermutung.
 Mit `1`–`5` wird eine markierte Stelle als Person, Firma, Ort, Nummer oder
-Sonstiges geschützt; zugeschaltete Erkennungen wie Website oder Aktenzeichen
-bekommen die Ziffern dahinter. `⌘⏎` legt den geschützten Text in die
+Sonstiges geschützt, mit `6`–`8` als Kunde, Dienstleister oder Tool;
+zugeschaltete Erkennungen wie Website oder Aktenzeichen haben einen Knopf.
+`T` fragt nach einem eigenen Typ: aus „Projekt" wird `PROJEKT_3F9A1C2D`.
+`⌘F` sucht und ersetzt im Text. `⌘⏎` legt den geschützten Text in die
 Zwischenablage.
 
 Die Antwort des KI-Tools kopieren, `⌃⌥⌘R` drücken, einfügen.
@@ -89,7 +91,7 @@ es von vorn los.
 
 Textschleuse nimmt diesen Umweg weg. Text kopieren, `⌃⌥⌘S` drücken: In der
 Zwischenablage liegt derselbe Text, nur stehen statt „Thorben Nyström" und
-„DE89 3704 …" Platzhalter wie `PERSON_3F9A1C7B2E4D6A0B5C` und `IBAN_…`. Den
+„DE89 3704 …" Platzhalter wie `PERSON_3F9A1C2D` und `IBAN_…`. Den
 fügt man ins KI-Tool ein. Die Antwort kopieren, `⌃⌥⌘R` drücken: Die echten
 Namen sind wieder drin. Ein Popup zeigt vorher, was ersetzt wird — Grün ist
 sicher erkannt, Rot ist eine Vermutung, die man mit einer Ziffer bestätigt
@@ -122,7 +124,7 @@ oder verwirft. Was man einmal bestätigt hat, merkt sich das Wörterbuch.
 **So läuft es ab**
 
 1. Text kopieren, `⌃⌥⌘S`. Das Popup zeigt die Fundstellen. Offene
-   Vermutungen mit `1`–`5` bestätigen, `⌘⏎` kopiert den geschützten Text.
+   Vermutungen mit `1`–`8` bestätigen, `⌘⏎` kopiert den geschützten Text.
 2. Im KI-Tool einfügen. Über dem Text steht ein Hinweis, die Platzhalter
    unverändert zu übernehmen.
 3. Antwort kopieren, `⌃⌥⌘R`, einfügen. Fertig.
@@ -199,7 +201,7 @@ lieber einen Namen zu viel als einen zu wenig, und der Nutzer verwirft.
 **Warum werden Decknamen aus einem Seed abgeleitet statt gezählt?**
 `PERSON_47` verriet, dass es mindestens 46 andere gibt und wer zuerst kam.
 Eine Zufallskennung verrät nichts, ist aber nur mit dem eigenen Wörterbuch
-zu deuten. Die Ableitung aus Seed und Name (HMAC-SHA256, 18 Stellen)
+zu deuten. Die Ableitung aus Seed und Name (HMAC-SHA256, 8 Hexzeichen)
 verbindet beides: nicht ablesbar ohne Seed, stabil und teilbar mit Seed. Der
 Seed liegt im verschlüsselten Wörterbuch. Alte Dateien mit Nummern bleiben
 lesbar; verschickte Texte gehen weiter auf.
