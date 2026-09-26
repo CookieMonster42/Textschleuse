@@ -22,7 +22,7 @@ final class MarkierungsPopover: NSViewController {
     private let kannZuordnen: Bool
     private let entscheidung: (Entscheidung) -> Void
     private let merkenHaken = NSButton(checkboxWithTitle: "dauerhaft merken", target: nil, action: nil)
-    private let typFeld = NSTextField()
+    private let typFeld = Typfeld()
     /// Die Ziffernknöpfe. Ihre Tasten schlafen, solange im Typ-Feld getippt
     /// wird — sonst schnappt „1" beim Tippen von „Projekt1" den Knopf.
     private var ziffernKnoepfe: [NSButton] = []
@@ -92,20 +92,29 @@ final class MarkierungsPopover: NSViewController {
         merkenHaken.font = .systemFont(ofSize: 11)
         merkenHaken.toolTip = "Aus heißt: gilt nur für diesen Text."
 
-        // Ein eigener Typ: „Projekt" ⏎ macht PROJEKT_… daraus.
-        typFeld.placeholderString = "eigener Typ, z. B. Projekt — dann ⏎"
+        // Ein eigener Typ: „Projekt" ⏎ macht PROJEKT_… daraus. Das Feld
+        // nimmt den Fokus erst auf Klick oder Taste T — sonst hätte es ihn
+        // beim Öffnen, und die Ziffern für Person, Firma, Ort landeten
+        // darin statt bei den Knöpfen.
+        typFeld.placeholderString = "eigener Typ, z. B. Projekt"
         typFeld.font = .systemFont(ofSize: 12)
         typFeld.target = self
         typFeld.action = #selector(typGewaehlt)
         typFeld.delegate = self
-        typFeld.toolTip = "Steht vorn am Decknamen statt des Kürzels. Taste T fragt danach."
+        typFeld.toolTip = "Steht vorn am Decknamen statt des Kürzels. T oder Klick, dann tippen und ⏎."
         let typEtikett = NSTextField(labelWithString: "Eigener Typ")
         typEtikett.font = .systemFont(ofSize: 11)
         typEtikett.textColor = .secondaryLabelColor
-        let typZeile = NSStackView(views: [typEtikett, typFeld])
+        let typTaste = NSButton(title: "T", target: self, action: #selector(typFeldFokussieren))
+        typTaste.bezelStyle = .rounded
+        typTaste.controlSize = .small
+        typTaste.keyEquivalent = "t"
+        typTaste.keyEquivalentModifierMask = []
+        typTaste.toolTip = "Taste T: ins Feld springen"
+        let typZeile = NSStackView(views: [typEtikett, typFeld, typTaste])
         typZeile.orientation = .horizontal
         typZeile.spacing = 6
-        typFeld.widthAnchor.constraint(equalToConstant: 260).isActive = true
+        typFeld.widthAnchor.constraint(equalToConstant: 240).isActive = true
 
         let fuss = NSTextField(labelWithString: "⎋ schließt dieses Feld.")
         fuss.font = .systemFont(ofSize: 10)
@@ -164,12 +173,23 @@ final class MarkierungsPopover: NSViewController {
         entscheidung(.eigenerTyp(eingabe, merken: merken))
     }
 
-    /// Für den Selbsttest: ist das Feld da?
+    /// Taste T oder der kleine Knopf: erst jetzt darf das Feld den Fokus.
+    @objc private func typFeldFokussieren() {
+        typFeld.darfFokus = true
+        typFeld.window?.makeFirstResponder(typFeld)
+    }
+
+    /// Für den Selbsttest: ist das Feld da, und hält es sich beim Öffnen
+    /// vom Fokus fern?
     var hatTypFeld: Bool { typFeld.superview != nil }
+    var typFeldNimmtFokus: Bool { typFeld.acceptsFirstResponder }
+    func typFeldFokussierenFuerPruefung() { typFeldFokussieren() }
 }
 
 extension MarkierungsPopover: NSTextFieldDelegate {
 
+    /// Solange getippt wird, schlafen die Zifferntasten der Knöpfe — sonst
+    /// schnappt „1" beim Tippen von „Projekt1" den Knopf.
     func controlTextDidBeginEditing(_ meldung: Notification) {
         for knopf in ziffernKnoepfe { knopf.keyEquivalent = "" }
     }
@@ -178,5 +198,22 @@ extension MarkierungsPopover: NSTextFieldDelegate {
         for knopf in ziffernKnoepfe {
             knopf.keyEquivalent = Kategorie.taste(fuerPlatz: knopf.tag) ?? ""
         }
+        typFeld.darfFokus = false
+    }
+}
+
+/// Ein Textfeld, das den Fokus nicht von selbst nimmt. Ein Popover macht
+/// beim Öffnen das erste Textfeld zum Ersten Antwortenden; hier wäre das
+/// falsch, weil die Ziffern den Kategorieknöpfen gehören. Ein Klick ins
+/// Feld oder die Taste T schalten den Fokus frei.
+final class Typfeld: NSTextField {
+
+    var darfFokus = false
+
+    override var acceptsFirstResponder: Bool { darfFokus }
+
+    override func mouseDown(with ereignis: NSEvent) {
+        darfFokus = true
+        super.mouseDown(with: ereignis)
     }
 }

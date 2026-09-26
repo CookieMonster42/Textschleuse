@@ -1102,6 +1102,21 @@ enum Selbsttest {
             print("✗ Eigener Typ: im Markierungsfeld fehlt das Feld")
             fehler += 1
         }
+        // Das Feld darf den Fokus nicht von selbst nehmen, sonst landen die
+        // Ziffern für die Kategorien darin.
+        if !feld.typFeldNimmtFokus {
+            print("✓ Eigener Typ: das Feld hält sich beim Öffnen vom Fokus fern")
+        } else {
+            print("✗ Eigener Typ: das Feld nimmt beim Öffnen den Fokus — die Ziffern wären tot")
+            fehler += 1
+        }
+        feld.typFeldFokussierenFuerPruefung()
+        if feld.typFeldNimmtFokus {
+            print("✓ Eigener Typ: mit T lässt es sich anspringen")
+        } else {
+            print("✗ Eigener Typ: T bringt den Fokus nicht ins Feld")
+            fehler += 1
+        }
         return fehler
     }
 
