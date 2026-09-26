@@ -54,6 +54,7 @@ enum Selbsttest {
         fehler += pruefeNormalesBearbeiten()
         fehler += pruefeTastenkuerzelBlatt()
         fehler += pruefeExport()
+        fehler += pruefeErsetzen()
 
         print("")
         print(fehler == 0 ? "Alles in Ordnung." : "\(fehler) Punkt(e) fehlgeschlagen.")
@@ -956,6 +957,97 @@ enum Selbsttest {
             print("✓ Ziffern: nach ⌘A tippt die Ziffer, keine Kategorie")
         } else {
             print("✗ Ziffern: nach ⌘A wird die Ziffer als Kategorie verstanden")
+            fehler += 1
+        }
+        return fehler
+    }
+
+    /// Suchen und Ersetzen: im Originaltext, Entscheidungen bleiben, ⌘Z nimmt
+    /// alles auf einmal zurück. Im Rückweg gibt es die Zeile nicht.
+    private static func pruefeErsetzen() -> Int {
+        var fehler = 0
+        let text = "Herr Nyström rief an. Frau Weidenbach rief zurück, Nyström nochmal."
+        let ansicht = SchutzAnsicht(analyse: Schleuse.analysiere(text, woerterbuch: Woerterbuch()))
+        let fenster = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1000, height: 640),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        fenster.contentView = ansicht
+        fenster.layoutIfNeeded()
+        defer { fenster.orderOut(nil) }
+
+        if ansicht.sucheHatErsatzzeileFuerPruefung() {
+            print("✓ Ersetzen: die Suche beim Schützen hat eine Ersatzzeile")
+        } else {
+            print("✗ Ersetzen: keine Ersatzzeile")
+            fehler += 1
+        }
+
+        // Eine Entscheidung vorher: Weidenbach verwerfen.
+        if let weidenbach = ansicht.analyse.funde.first(where: { $0.text.contains("Weidenbach") }) {
+            ansicht.waehleFundFuerPruefung(weidenbach.id)
+            _ = ansicht.pfeilFuerPruefung(runter: false)
+            ansicht.waehleFundFuerPruefung(weidenbach.id)
+        }
+        ansicht.verwerfeAktuellenFuerPruefung()
+        ansicht.schliesseStandFuerPruefung()
+        let verworfenVorher = ansicht.analyse.funde.filter(\.verworfen).map(\.text)
+
+        let ersetzt = ansicht.ersetzeAlleFuerPruefung("rief", durch: "schrieb")
+        ansicht.schliesseStandFuerPruefung()
+        if ersetzt == 2, ansicht.analyse.original == "Herr Nyström schrieb an. Frau Weidenbach schrieb zurück, Nyström nochmal." {
+            print("✓ Ersetzen: „rief\" wird an zwei Stellen im Originaltext ersetzt")
+        } else {
+            print("✗ Ersetzen: \(ersetzt) ersetzt, Text „\(ansicht.analyse.original)\"")
+            fehler += 1
+        }
+        let verworfenNachher = ansicht.analyse.funde.filter(\.verworfen).map(\.text)
+        if !verworfenVorher.isEmpty, verworfenNachher == verworfenVorher {
+            print("✓ Ersetzen: Verworfenes bleibt verworfen (\(verworfenNachher.joined(separator: ", ")))")
+        } else {
+            print("✗ Ersetzen: Entscheidungen verloren (vorher \(verworfenVorher), nachher \(verworfenNachher))")
+            fehler += 1
+        }
+
+        // Ganze Wörter: „an" trifft nicht „Nyström nochmal" … und nicht „an" in „nochmal".
+        let ganze = ansicht.ersetzeAlleFuerPruefung("an", durch: "AN", wortgrenzen: true)
+        ansicht.schliesseStandFuerPruefung()
+        if ganze == 1, ansicht.analyse.original.contains("schrieb AN."), ansicht.analyse.original.contains("Weidenbach") {
+            print("✓ Ersetzen: mit Wortgrenzen trifft „an\" nur das Wort, nicht „Weidenbach\"")
+        } else {
+            print("✗ Ersetzen: Wortgrenzen — \(ganze) ersetzt, Text „\(ansicht.analyse.original)\"")
+            fehler += 1
+        }
+
+        // Einzeln: der aktuelle Treffer, auch wenn er in einem Chip liegt.
+        let einzeln = ansicht.ersetzeAktuellenFuerPruefung("Nyström", durch: "Nyström-Berg")
+        if einzeln == 1, ansicht.analyse.original.hasPrefix("Herr Nyström-Berg schrieb"),
+           ansicht.analyse.original.contains(", Nyström nochmal") {
+            print("✓ Ersetzen: einzeln ersetzt nur den aktuellen Treffer")
+        } else {
+            print("✗ Ersetzen: einzeln — \(einzeln) ersetzt, Text „\(ansicht.analyse.original)\"")
+            fehler += 1
+        }
+
+        // ⌘Z dreimal: zurück zum verworfenen Stand mit dem alten Text. Die
+        // letzte Gruppe bleibt offen — ⌘Z schließt sie selbst, wie im Betrieb.
+        ansicht.widerrufeFuerPruefung()
+        ansicht.widerrufeFuerPruefung()
+        ansicht.widerrufeFuerPruefung()
+        if ansicht.analyse.original == text, ansicht.analyse.funde.contains(where: \.verworfen) {
+            print("✓ Ersetzen: ⌘Z nimmt jeden Durchlauf als Ganzes zurück")
+        } else {
+            print("✗ Ersetzen: nach ⌘Z steht „\(ansicht.analyse.original)\"")
+            fehler += 1
+        }
+
+        let rueckweg = RueckwegAnsicht(ergebnis: Rueckweg.analysiere("PERSON_1 grüßt.", woerterbuch: Woerterbuch()))
+        if !rueckweg.sucheHatErsatzzeileFuerPruefung() {
+            print("✓ Ersetzen: im Rückweg bleibt die Ersatzzeile verborgen")
+        } else {
+            print("✗ Ersetzen: der Rückweg zeigt eine Ersatzzeile")
             fehler += 1
         }
         return fehler

@@ -1889,4 +1889,25 @@ Pruefstand.pruefe("Alte Dateien: Nummern bleiben, Alias in beiden Schreibweisen"
                       "An Nyström und Thorben Nyström.", "Rückweg mit alter Datei")
 }
 
+// MARK: Suchen und Ersetzen
+
+Pruefstand.pruefe("Textersatz: alle, ganze Wörter, einzeln") {
+    let text = "Mai schrieb an Maier im Mai."
+    let alle = Textersatz.ersetze(in: text, begriff: "mai", durch: "Juni", wortgrenzen: false)
+    Pruefstand.gleich(alle.anzahl, 3, "ohne Wortgrenzen trifft „mai\" auch „Maier\"")
+    Pruefstand.gleich(alle.text, "Juni schrieb an Junier im Juni.", "alle Stellen ersetzt")
+
+    let ganze = Textersatz.ersetze(in: text, begriff: "mai", durch: "Juni", wortgrenzen: true)
+    Pruefstand.gleich(ganze.anzahl, 2, "mit Wortgrenzen bleibt „Maier\" stehen")
+    Pruefstand.gleich(ganze.text, "Juni schrieb an Maier im Juni.", "nur die ganzen Wörter")
+
+    let umlaut = Textersatz.ersetze(in: "Herr Nyström und Herr Nystrom", begriff: "nystrom", durch: "N.", wortgrenzen: true)
+    Pruefstand.gleich(umlaut.anzahl, 2, "ohne Rücksicht auf Umlautpünktchen")
+
+    let einzeln = Textersatz.ersetze(in: text, bereich: (text as NSString).range(of: "Maier"), durch: "Meier")
+    Pruefstand.gleich(einzeln.text, "Mai schrieb an Meier im Mai.", "ein Bereich, sonst nichts")
+    Pruefstand.gleich(Textersatz.ersetze(in: text, begriff: "", durch: "x", wortgrenzen: false).anzahl, 0,
+                      "leerer Begriff ersetzt nichts")
+}
+
 Pruefstand.bilanzUndEnde()

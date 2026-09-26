@@ -33,7 +33,7 @@ final class RueckwegAnsicht: NSView, NSUserInterfaceValidations {
     private var textAnsicht: ChiptextAnsicht { flaeche.text }
     private var rollflaeche: NSScrollView { flaeche.rolle }
     private let liste = Fundstellenliste()
-    private lazy var suche = Textsuche(ziel: textAnsicht)
+    private lazy var suche = Textsuche(ziel: textAnsicht, mitErsetzen: false)
     /// Zwei beschriftete Reihen unter dem Text, wie beim Schützen: erst, was
     /// mit dem Platzhalter geschehen soll, dann die Werkzeuge für den Text.
     private let platzhalterLeiste = Fliessleiste()
@@ -617,6 +617,7 @@ final class RueckwegAnsicht: NSView, NSUserInterfaceValidations {
     }
 
     func pruefeJetztFuerPruefung() { pruefeJetzt() }
+    func sucheHatErsatzzeileFuerPruefung() -> Bool { suche.hatErsatzzeile }
     func setzeTextFuerPruefung(_ text: String) {
         textAnsicht.string = text
         pruefeJetzt()
