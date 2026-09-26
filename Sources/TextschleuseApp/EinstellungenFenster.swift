@@ -151,7 +151,9 @@ final class EinstellungenFenster: NSWindowController {
     private var woerterbuch: Woerterbuch
     private let beimWoerterbuch: (Woerterbuch) -> Void
     private var freiliste: FreilisteAnsicht?
-    private let seedFeld = NSTextField()
+    /// Zeigt den Fingerabdruck, nie den ganzen Seed. Acht von 64 Stellen
+    /// reichen, um zwei Seeds zu vergleichen, und verraten den Rest nicht.
+    private let seedAnzeige = NSTextField(labelWithString: "")
     private let seedMeldung = NSTextField(labelWithString: "")
 
     static func zeige(
@@ -243,28 +245,34 @@ final class EinstellungenFenster: NSWindowController {
         )
         nurLeiste.state = einstellungen.nurMenueleiste ? .on : .off
 
-        // Der Seed: aus ihm und dem Namen entsteht der Deckname.
-        seedFeld.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
-        seedFeld.stringValue = woerterbuch.seed
-        seedFeld.target = self
-        seedFeld.action = #selector(seedUebernehmen)
-        seedFeld.toolTip = "Einen Seed von einem anderen Rechner hier einfügen und ⏎ drücken."
-        seedFeld.widthAnchor.constraint(equalToConstant: 300).isActive = true
-        let kopieren = NSButton(title: "Kopieren", target: self, action: #selector(seedKopieren))
+        // Der Seed: aus ihm und dem Namen entsteht der Deckname. Zu sehen
+        // ist nur der Fingerabdruck; kopiert wird der ganze.
+        seedAnzeige.font = .monospacedSystemFont(ofSize: 12, weight: .medium)
+        seedAnzeige.toolTip = "Die ersten acht Stellen des Seeds. Zum Vergleichen mit einem anderen Rechner."
+        zeigeFingerabdruck()
+        let kopieren = NSButton(title: "Seed kopieren", target: self, action: #selector(seedKopieren))
         kopieren.bezelStyle = .rounded
-        let neu = NSButton(title: "Neu erzeugen", target: self, action: #selector(seedNeu))
+        kopieren.toolTip = "Legt den ganzen Seed in die Zwischenablage — für den anderen Rechner."
+        let einfuegen = NSButton(title: "Aus Zwischenablage übernehmen …", target: self, action: #selector(seedEinfuegen))
+        einfuegen.bezelStyle = .rounded
+        einfuegen.toolTip = "Nimmt den Seed aus der Zwischenablage und leitet alle Decknamen neu ab."
+        let neu = NSButton(title: "Neu erzeugen …", target: self, action: #selector(seedNeu))
         neu.bezelStyle = .rounded
-        let seedZeile = NSStackView(views: [seedFeld, kopieren, neu])
+        neu.toolTip = "Ein frischer Seed; alle Decknamen werden neu abgeleitet, die alten bleiben auflösbar."
+        let seedZeile = NSStackView(views: [seedAnzeige, kopieren])
         seedZeile.orientation = .horizontal
         seedZeile.spacing = 8
+        let wechselZeile = NSStackView(views: [einfuegen, neu])
+        wechselZeile.orientation = .horizontal
+        wechselZeile.spacing = 8
         let ableiten = NSButton(
-            title: "Alle Decknamen aus dem Seed neu ableiten …",
+            title: "Decknamen mit alter Nummer neu ableiten …",
             target: self,
             action: #selector(alleNeuAbleiten)
         )
         ableiten.bezelStyle = .rounded
-        ableiten.toolTip = "Nach einem Seed-Wechsel: jeder Eintrag bekommt den Deckname, "
-            + "der zum Seed passt. Die alten bleiben auflösbar."
+        ableiten.toolTip = "Für Einträge aus der Zeit vor dem Seed, die noch PERSON_7 heißen. "
+            + "Die alten Namen bleiben auflösbar."
         seedMeldung.font = .systemFont(ofSize: 11)
         seedMeldung.textColor = .secondaryLabelColor
 
@@ -279,7 +287,8 @@ final class EinstellungenFenster: NSWindowController {
             beschriftet("Geht auf", position),
             trenner(),
             ueberschrift("Seed für die Decknamen"),
-            beschriftet("Seed", seedZeile),
+            beschriftet("Fingerabdruck", seedZeile),
+            beschriftet("Wechseln", wechselZeile),
             beschriftet("", ableiten),
             beschriftet("", seedMeldung),
             hinweisZeile("Aus dem Seed und dem Namen entsteht der Deckname. Wer denselben Seed hat, "
@@ -340,41 +349,88 @@ final class EinstellungenFenster: NSWindowController {
 
     /// Für den Selbsttest.
     func freilisteFuerPruefung() -> FreilisteAnsicht? { freiliste }
-    func seedFeldFuerPruefung() -> NSTextField { seedFeld }
-    func setzeSeedFuerPruefung(_ seed: String) {
-        seedFeld.stringValue = seed
-        seedUebernehmen()
+    func seedFingerabdruckFuerPruefung() -> String { seedAnzeige.stringValue }
+    /// Wie „Aus Zwischenablage übernehmen", nur ohne Zwischenablage und Rückfrage.
+    @discardableResult
+    func setzeSeedFuerPruefung(_ seed: String) -> Bool {
+        wechsleSeed(auf: seed)
     }
 
     // MARK: Seed
 
-    /// Nimmt das ins Wörterbuch, was im Feld steht — sobald ⏎ gedrückt oder
-    /// das Feld verlassen wird.
-    @objc private func seedUebernehmen() {
-        let neu = seedFeld.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func zeigeFingerabdruck() {
+        seedAnzeige.stringValue = Decknamen.fingerabdruck(woerterbuch.seed) + " …"
+    }
+
+    /// Ein Seedwechsel ist ein Schritt: neuer Seed, alle Decknamen neu
+    /// abgeleitet, die alten bleiben als frühere auflösbar. Selbst vergebene
+    /// Decknamen bleiben unangetastet. Liefert false, wenn nichts zu tun war.
+    @discardableResult
+    private func wechsleSeed(auf eingabe: String) -> Bool {
+        let neu = eingabe.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !neu.isEmpty else {
-            seedFeld.stringValue = woerterbuch.seed
             melde("Ein leerer Seed geht nicht. Der bisherige bleibt.")
-            return
+            return false
         }
-        guard neu != woerterbuch.seed else { return }
+        guard neu != woerterbuch.seed else {
+            melde("Das ist schon der Seed dieses Wörterbuchs.")
+            return false
+        }
         woerterbuch.seed = neu
-        seedFeld.stringValue = neu
+        let geaendert = woerterbuch.leiteAlleNeuAb()
+        zeigeFingerabdruck()
         freiliste?.setze(woerterbuch: woerterbuch)
         beimWoerterbuch(woerterbuch)
-        melde("Neuer Seed übernommen. Er gilt für alle Decknamen, die ab jetzt entstehen — "
-            + "die bestehenden bleiben, bis du sie neu ableitest.")
+        melde(geaendert == 0
+            ? "Neuer Seed übernommen. Das Wörterbuch ist leer, es gab nichts abzuleiten."
+            : "Neuer Seed übernommen, \(geaendert) Decknamen neu abgeleitet. Die alten bleiben auflösbar.")
+        return true
+    }
+
+    /// Fragt vor dem Wechsel, weil sich danach jeder Deckname ändert.
+    private func frageVorWechsel(_ titel: String, _ text: String) -> Bool {
+        let frage = NSAlert()
+        frage.messageText = titel
+        let anzahl = woerterbuch.eintraege.count
+        frage.informativeText = text + (anzahl > 0
+            ? " Alle \(anzahl) Decknamen werden neu abgeleitet; schon verschickte Texte gehen weiter auf."
+            : "")
+        frage.addButton(withTitle: "Wechseln")
+        frage.addButton(withTitle: "Abbrechen")
+        return frage.runModal() == .alertFirstButtonReturn
     }
 
     @objc private func seedKopieren() {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(woerterbuch.seed, forType: .string)
-        melde("Seed in der Zwischenablage. Auf dem anderen Rechner hier einfügen und ⏎ drücken.")
+        melde("Der ganze Seed liegt in der Zwischenablage. Auf dem anderen Rechner: "
+            + "„Aus Zwischenablage übernehmen\".")
+    }
+
+    @objc private func seedEinfuegen() {
+        guard let inhalt = NSPasteboard.general.string(forType: .string)?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !inhalt.isEmpty
+        else {
+            melde("In der Zwischenablage liegt kein Seed.")
+            return
+        }
+        guard inhalt.count >= 16, inhalt.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" }) else {
+            melde("Das in der Zwischenablage sieht nicht nach einem Seed aus.")
+            return
+        }
+        guard frageVorWechsel(
+            "Seed \(Decknamen.fingerabdruck(inhalt)) … übernehmen?",
+            "Danach vergibt dieses Wörterbuch dieselben Decknamen wie das, von dem der Seed stammt."
+        ) else { return }
+        wechsleSeed(auf: inhalt)
     }
 
     @objc private func seedNeu() {
-        seedFeld.stringValue = Decknamen.neuerSeed()
-        seedUebernehmen()
+        guard frageVorWechsel(
+            "Einen neuen Seed erzeugen?",
+            "Wer den bisherigen Seed kennt, kann neue Texte danach nicht mehr zuordnen."
+        ) else { return }
+        wechsleSeed(auf: Decknamen.neuerSeed())
     }
 
     @objc private func alleNeuAbleiten() {
@@ -384,10 +440,10 @@ final class EinstellungenFenster: NSWindowController {
             return
         }
         let frage = NSAlert()
-        frage.messageText = "Alle \(anzahl) Decknamen neu aus dem Seed ableiten?"
-        frage.informativeText = "Jeder Eintrag bekommt den Deckname, der zu diesem Seed und seinem "
-            + "Namen passt. Schon verschickte Texte gehen weiter auf, die alten Decknamen bleiben "
-            + "als frühere erhalten. Selbst vergebene Decknamen ändern sich nicht."
+        frage.messageText = "Decknamen mit alter Nummer neu aus dem Seed ableiten?"
+        frage.informativeText = "Einträge aus der Zeit vor dem Seed heißen noch PERSON_7. Sie bekommen "
+            + "den Deckname, der zum Seed passt; die alten Namen bleiben als frühere auflösbar. "
+            + "Selbst vergebene Decknamen ändern sich nicht."
         frage.addButton(withTitle: "Neu ableiten")
         frage.addButton(withTitle: "Abbrechen")
         guard frage.runModal() == .alertFirstButtonReturn else { return }
