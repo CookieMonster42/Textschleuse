@@ -10,7 +10,7 @@ cd "$(dirname "$0")"
 KONFIGURATION=release
 BUNDLE=".build/Textschleuse.app"
 BUNDLE_ID="io.github.cookiemonster42.textschleuse"
-VERSION="0.6"
+VERSION="0.6.1"
 
 echo "→ Prüfungen"
 swift run --configuration "$KONFIGURATION" Pruefungen

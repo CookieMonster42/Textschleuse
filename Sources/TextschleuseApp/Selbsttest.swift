@@ -101,7 +101,13 @@ enum Selbsttest {
             .appendingPathComponent("textschleuse-selbsttest-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: ordner) }
 
-        let speicher = Speicher(ordner: ordner)
+        // Eigener Dienstname im Schlüsselbund und danach aufräumen: der
+        // Selbsttest darf den echten Schlüssel nie anfassen. Einmal hat er
+        // unter der echten Kennung geschrieben und damit die Übernahme des
+        // alten Bestands blockiert.
+        let quelle = KeychainSchluessel(dienst: Speicher.bundleId + ".selbsttest", alterDienst: nil)
+        defer { quelle.loescheAlle() }
+        let speicher = Speicher(ordner: ordner, schluesselquelle: quelle)
         // Der Selbsttest darf den gelebten Bestand nicht anfassen. Wenn diese
         // Zusicherung je bricht, soll es hier auffallen und nicht dort.
         guard !speicher.istEchterBestand else {
@@ -116,7 +122,7 @@ enum Selbsttest {
 
         do {
             try speicher.sichern(buch)
-            let geladen = try Speicher(ordner: ordner).laden()
+            let geladen = try Speicher(ordner: ordner, schluesselquelle: quelle).laden()
             guard geladen.eintraege.first?.text == "Selbsttest Person" else {
                 print("✗ Keychain: geladen, aber der Inhalt stimmt nicht")
                 return 1
