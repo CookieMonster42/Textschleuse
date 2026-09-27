@@ -22,6 +22,7 @@ enum Selbsttest {
         print("Kennung:  \(Bundle.main.bundleIdentifier ?? "keine")")
         print("")
 
+        fehler += pruefeKennung()
         fehler += pruefeKeychain()
         fehler += pruefeZwischenablage()
         fehler += pruefeKurzbefehl()
@@ -61,6 +62,38 @@ enum Selbsttest {
         print("")
         print(fehler == 0 ? "Alles in Ordnung." : "\(fehler) Punkt(e) fehlgeschlagen.")
         exit(fehler == 0 ? 0 : 1)
+    }
+
+    /// Nach der Umstellung von `de.risiq.textschleuse` auf die neue Kennung
+    /// muss das Bundle die neue tragen — sonst zeigt `istEchterBestand`
+    /// hinterher wieder auf den alten Pfad, und die Migration liefe ins Leere.
+    private static func pruefeKennung() -> Int {
+        var fehler = 0
+        if Bundle.main.bundleIdentifier == Speicher.bundleId {
+            print("✓ Kennung: das Bundle trägt \(Speicher.bundleId)")
+        } else {
+            print("✗ Kennung: das Bundle trägt \(Bundle.main.bundleIdentifier ?? "keine") statt \(Speicher.bundleId)")
+            fehler += 1
+        }
+
+        if Speicher.echterOrdner.lastPathComponent == Speicher.bundleId {
+            print("✓ Kennung: der echte Ordner heißt \(Speicher.echterOrdner.lastPathComponent)")
+        } else {
+            print("✗ Kennung: der echte Ordner heißt \(Speicher.echterOrdner.lastPathComponent) "
+                + "statt \(Speicher.bundleId)")
+            fehler += 1
+        }
+
+        // Konstruieren allein tut nichts mit der Keychain — das passiert
+        // erst bei laden()/sichern(). Ungefährlich, hier nur den Pfad zu
+        // vergleichen.
+        if Speicher().istEchterBestand {
+            print("✓ Kennung: Speicher() ohne eigenen Ordner zeigt auf den echten (neuen) Bestand")
+        } else {
+            print("✗ Kennung: Speicher() ohne eigenen Ordner zeigt nicht auf den echten Bestand")
+            fehler += 1
+        }
+        return fehler
     }
 
     private static func pruefeKeychain() -> Int {

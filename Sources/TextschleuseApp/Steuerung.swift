@@ -43,6 +43,24 @@ final class Steuerung: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: Start
 
     private func ladeWoerterbuch() {
+        // Erst der Schlüssel, dann der Ordner: eine schon kopierte Datei
+        // wäre ohne den passenden Schlüssel nicht mehr lesbar. Beides betrifft
+        // nur die alte Bundle-Kennung `de.risiq.textschleuse` und läuft nur
+        // an, solange im neuen Bestand noch nichts liegt — siehe
+        // `Speicher.migriereAltenBestand()`.
+        let bestandUebernommen: Bool
+        do {
+            _ = try speicher.migriereAltenSchluessel()
+            bestandUebernommen = try speicher.migriereAltenBestand()
+        } catch {
+            // Auf keinen Fall jetzt weiterladen: eine frisch gesäte, leere
+            // Datei über den alten Bestand zu schreiben, würde ihn hinter
+            // einem Stub verstecken, der jede spätere Migration verhindert.
+            zeigeFehler("Der Bestand aus der vorigen Version ließ sich nicht übernehmen", error)
+            woerterbuch = Woerterbuch()
+            return
+        }
+
         do {
             woerterbuch = try speicher.laden()
             // Eine Datei von vor dem Seed: der frische Seed muss sofort in
@@ -57,6 +75,12 @@ final class Steuerung: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 } catch {
                     zeigeFehler("Das Wörterbuch ließ sich nach der Umstellung nicht speichern", error)
                 }
+            }
+            if bestandUebernommen {
+                let hinweis = NSAlert()
+                hinweis.messageText = "Bestand übernommen"
+                hinweis.informativeText = "Das Wörterbuch aus der vorigen Version ist jetzt hier gespeichert."
+                hinweis.runModal()
             }
         } catch {
             let meldung = NSAlert()

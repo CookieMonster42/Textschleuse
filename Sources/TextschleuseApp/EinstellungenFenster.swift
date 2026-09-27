@@ -299,7 +299,7 @@ final class EinstellungenFenster: NSWindowController {
             hinweise,
             nurLeiste,
             hinweisZeile("Das Wörterbuch liegt verschlüsselt in "
-                + "~/Library/Application Support/de.risiq.textschleuse/. "
+                + "~/Library/Application Support/\(Speicher.bundleId)/. "
                 + "Texte werden nie gespeichert."),
         ])
         stapel.orientation = .vertical
