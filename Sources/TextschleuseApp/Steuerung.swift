@@ -43,14 +43,11 @@ final class Steuerung: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: Start
 
     private func ladeWoerterbuch() {
-        // Erst der Schlüssel, dann der Ordner: eine schon kopierte Datei
-        // wäre ohne den passenden Schlüssel nicht mehr lesbar. Beides betrifft
-        // nur die alte Bundle-Kennung `de.risiq.textschleuse` und läuft nur
-        // an, solange im neuen Bestand noch nichts liegt — siehe
-        // `Speicher.migriereAltenBestand()`.
+        // Übernahme aus der alten Bundle-Kennung `de.risiq.textschleuse`:
+        // Schlüssel und Ordner in einem Schritt, und nur, solange im neuen
+        // Bestand noch nichts liegt — siehe `Speicher.migriere(von:)`.
         let bestandUebernommen: Bool
         do {
-            _ = try speicher.migriereAltenSchluessel()
             bestandUebernommen = try speicher.migriereAltenBestand()
         } catch {
             // Auf keinen Fall jetzt weiterladen: eine frisch gesäte, leere

@@ -214,6 +214,11 @@ public final class Speicher {
         let alteDatei = alterOrdner.appendingPathComponent("woerterbuch.dat")
         guard FileManager.default.fileExists(atPath: alteDatei.path) else { return false }
 
+        // Erst der Schlüssel, dann die Datei: eine kopierte Datei ohne ihren
+        // Schlüssel ist wertlos. Und nur hier — solange keine Datei liegt,
+        // schützt ein Schlüssel unter der neuen Kennung noch nichts und darf
+        // ersetzt werden.
+        try schluesselquelle.migriereAltenSchluessel()
         try FileManager.default.createDirectory(at: ordner, withIntermediateDirectories: true)
         try FileManager.default.copyItem(at: alteDatei, to: datei)
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: datei.path)
@@ -338,12 +343,6 @@ public final class Speicher {
         try schluesselquelle.schluessel()
     }
 
-    /// Reine Weiterleitung an die Schlüsselquelle — der Speicher selbst weiß
-    /// nichts von Kennungen im Schlüsselbund, nur die Schlüsselquelle tut das.
-    @discardableResult
-    public func migriereAltenSchluessel() throws -> Bool {
-        try schluesselquelle.migriereAltenSchluessel()
-    }
 }
 
 // MARK: - Keychain
@@ -366,7 +365,23 @@ public final class Speicher {
 /// Entwicklerzertifikat — mit Ad-hoc-Signatur beendet macOS den Prozess sofort.
 public struct KeychainSchluessel: Schluesselquelle {
 
-    public init() {}
+    /// Der Dienstname im Schlüsselbund. Der Selbsttest nimmt einen eigenen,
+    /// damit er den echten Schlüssel nie anfasst — genau das ist einmal
+    /// passiert und hat die Übernahme des alten Bestands blockiert.
+    public let dienst: String
+    /// Wo ein Schlüssel von vor der Umbenennung liegen kann. `nil` heißt:
+    /// nichts zu übernehmen.
+    public let alterDienst: String?
+
+    public init(dienst: String = Speicher.bundleId, alterDienst: String? = Speicher.alteBundleId) {
+        self.dienst = dienst
+        self.alterDienst = alterDienst
+    }
+
+    /// Für den Selbsttest: räumt den eigenen Dienstnamen wieder leer.
+    public func loescheAlle() {
+        SecItemDelete(grundmuster as CFDictionary)
+    }
 
     public func schluessel() throws -> SymmetricKey {
         if let vorhanden = try alleSchluessel().first { return vorhanden }
@@ -385,7 +400,7 @@ public struct KeychainSchluessel: Schluesselquelle {
         // Erst die Referenzen holen, dann für jede einzeln die Daten. Der
         // Datei-Schlüsselbund kann `kSecReturnData` nicht mit
         // `kSecMatchLimitAll` zusammen — das gibt Status -50.
-        var frage = Self.grundmuster
+        var frage = grundmuster
         frage[kSecReturnRef as String] = true
         frage[kSecMatchLimit as String] = kSecMatchLimitAll
 
@@ -424,7 +439,7 @@ public struct KeychainSchluessel: Schluesselquelle {
     }
 
     public func vereinheitliche(auf schluessel: SymmetricKey) throws {
-        SecItemDelete(Self.grundmuster as CFDictionary)
+        SecItemDelete(grundmuster as CFDictionary)
         try schreiben(schluessel)
     }
 
@@ -438,11 +453,11 @@ public struct KeychainSchluessel: Schluesselquelle {
     /// einmalig einen Schlüsselbund-Dialog zeigen. Das ist hinzunehmen.
     @discardableResult
     public func migriereAltenSchluessel() throws -> Bool {
-        guard try alleSchluessel().isEmpty else { return false }
+        guard let alterDienst else { return false }
 
         let frage: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Speicher.alteBundleId,
+            kSecAttrService as String: alterDienst,
             kSecAttrAccount as String: Speicher.schluesselKonto,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
@@ -459,17 +474,21 @@ public struct KeychainSchluessel: Schluesselquelle {
             throw SpeicherFehler.schluesselNichtLesbar(status)
         }
         guard let daten = ergebnis as? Data, daten.count == 32 else { return false }
+        let alter = SymmetricKey(data: daten)
+        // Liegt er schon unter dem neuen Namen, ist nichts zu tun. Ein
+        // anderer Schlüssel dort wird ersetzt, siehe `Speicher.migriere(von:)`.
+        if try alleSchluessel().contains(alter) { return false }
 
-        try schreiben(SymmetricKey(data: daten))
+        try schreiben(alter)
         return true
     }
 
     /// Das Suchmuster ohne Wert und ohne Zugriffsliste. Beides gehört ins
     /// Schreiben, nicht ins Suchen — sonst trifft die Suche nichts.
-    private static var grundmuster: [String: Any] {
+    private var grundmuster: [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Speicher.bundleId,
+            kSecAttrService as String: dienst,
             kSecAttrAccount as String: Speicher.schluesselKonto,
         ]
     }
@@ -478,14 +497,14 @@ public struct KeychainSchluessel: Schluesselquelle {
         let daten = schluessel.withUnsafeBytes { Data($0) }
         var eintrag: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Speicher.bundleId,
+            kSecAttrService as String: dienst,
             kSecAttrAccount as String: Speicher.schluesselKonto,
             kSecValueData as String: daten,
         ]
         if let zugriff = Self.zugriffOhneRueckfrage() {
             eintrag[kSecAttrAccess as String] = zugriff
         }
-        SecItemDelete(Self.grundmuster as CFDictionary)
+        SecItemDelete(grundmuster as CFDictionary)
         let status = SecItemAdd(eintrag as CFDictionary, nil)
         guard status == errSecSuccess else {
             throw SpeicherFehler.schluesselNichtLesbar(status)
