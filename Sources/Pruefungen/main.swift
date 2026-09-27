@@ -428,6 +428,92 @@ Pruefstand.pruefe("Speicher: Klartext-Export und -Import") {
     }
 }
 
+Pruefstand.pruefe("Speicher: Bestand aus alter Kennung übernehmen") {
+    let alt = FileManager.default.temporaryDirectory
+        .appendingPathComponent("textschleuse-pruefung-migration-alt-\(UUID().uuidString)")
+    let neu = FileManager.default.temporaryDirectory
+        .appendingPathComponent("textschleuse-pruefung-migration-neu-\(UUID().uuidString)")
+    defer {
+        try? FileManager.default.removeItem(at: alt)
+        try? FileManager.default.removeItem(at: neu)
+    }
+
+    // Derselbe feste Schlüssel für beide: in der echten App übernimmt
+    // `migriereAltenSchluessel()` genau das für den Keychain-Schlüssel, hier
+    // geht es nur um den Ordner.
+    let quelle = FesterSchluessel()
+    let alterSpeicher = Speicher(ordner: alt, schluesselquelle: quelle)
+    var buch = Woerterbuch()
+    _ = buch.anlegen(text: "Thorben Nyström", kategorie: .person)
+
+    do {
+        try alterSpeicher.sichern(buch)
+        // Eine zweite Sicherung, damit auch der Sicherungsordner etwas zum
+        // Mitnehmen hat.
+        _ = buch.anlegen(text: "Anna Beispiel", kategorie: .person)
+        try alterSpeicher.sichern(buch)
+
+        let neuerSpeicher = Speicher(ordner: neu, schluesselquelle: quelle)
+        let uebernommen = try neuerSpeicher.migriere(von: alt)
+        Pruefstand.wahr(uebernommen, "die erste Migration meldet Erfolg")
+
+        let geladen = try neuerSpeicher.laden()
+        Pruefstand.gleich(geladen.eintraege.count, buch.eintraege.count, "gleiche Anzahl Einträge im neuen Ordner")
+        Pruefstand.gleich(
+            Set(geladen.eintraege.map(\.text)), Set(buch.eintraege.map(\.text)),
+            "gleicher Inhalt im neuen Ordner"
+        )
+
+        Pruefstand.wahr(
+            FileManager.default.fileExists(atPath: alterSpeicher.datei.path),
+            "die alte Datei bleibt unverändert liegen — kopiert, nicht verschoben"
+        )
+        Pruefstand.falsch(alterSpeicher.sicherungen().isEmpty, "auch die alten Sicherungen bleiben liegen")
+        Pruefstand.gleich(
+            neuerSpeicher.sicherungen().count, alterSpeicher.sicherungen().count,
+            "die Sicherungen sind mitgekommen"
+        )
+
+        let zweitesMal = try neuerSpeicher.migriere(von: alt)
+        Pruefstand.falsch(zweitesMal, "ein zweiter Aufruf migriert nichts mehr")
+    } catch {
+        Pruefstand.wahr(false, "Migration ohne Fehler (\(error))")
+    }
+}
+
+Pruefstand.pruefe("Speicher: vorhandene Datei im neuen Ordner bleibt unangetastet") {
+    let alt = FileManager.default.temporaryDirectory
+        .appendingPathComponent("textschleuse-pruefung-migration-alt-\(UUID().uuidString)")
+    let neu = FileManager.default.temporaryDirectory
+        .appendingPathComponent("textschleuse-pruefung-migration-neu-\(UUID().uuidString)")
+    defer {
+        try? FileManager.default.removeItem(at: alt)
+        try? FileManager.default.removeItem(at: neu)
+    }
+
+    let quelle = FesterSchluessel()
+    var altesBuch = Woerterbuch()
+    _ = altesBuch.anlegen(text: "Thorben Nyström", kategorie: .person)
+    let alterSpeicher = Speicher(ordner: alt, schluesselquelle: quelle)
+
+    var neuesBuch = Woerterbuch()
+    _ = neuesBuch.anlegen(text: "Anna Beispiel", kategorie: .person)
+    let neuerSpeicher = Speicher(ordner: neu, schluesselquelle: quelle)
+
+    do {
+        try alterSpeicher.sichern(altesBuch)
+        try neuerSpeicher.sichern(neuesBuch)
+
+        let uebernommen = try neuerSpeicher.migriere(von: alt)
+        Pruefstand.falsch(uebernommen, "mit vorhandener Datei im neuen Ordner wird nichts übernommen")
+
+        let geladen = try neuerSpeicher.laden()
+        Pruefstand.gleich(geladen.eintraege.first?.text, "Anna Beispiel", "die neue Datei bleibt, wie sie war")
+    } catch {
+        Pruefstand.wahr(false, "ohne Fehler (\(error))")
+    }
+}
+
 Pruefstand.pruefe("Wörterbuch: Kennungen hängen am Namen, nicht an der Reihenfolge") {
     // Mit der Ableitung statt des Zählers: ein anderer Name bekommt eine
     // andere Kennung, derselbe Name nach dem Löschen wieder dieselbe.

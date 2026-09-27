@@ -42,11 +42,20 @@ public protocol Schluesselquelle: Sendable {
     func alleSchluessel() throws -> [SymmetricKey]
     /// Wirft alle bis auf den übergebenen weg.
     func vereinheitliche(auf schluessel: SymmetricKey) throws
+    /// Übernimmt einen Schlüssel, der noch unter der alten Bundle-Kennung
+    /// liegt, sofern unter der neuen noch keiner existiert. Der alte Eintrag
+    /// bleibt stehen. Rückgabe: ob übernommen wurde.
+    @discardableResult
+    func migriereAltenSchluessel() throws -> Bool
 }
 
 public extension Schluesselquelle {
     func alleSchluessel() throws -> [SymmetricKey] { [try schluessel()] }
     func vereinheitliche(auf schluessel: SymmetricKey) throws {}
+    /// Der Prüfstand hat keine Keychain und damit auch keine alte Kennung —
+    /// hier ist nichts zu tun.
+    @discardableResult
+    func migriereAltenSchluessel() throws -> Bool { false }
 }
 
 /// Ein Schlüssel, der im Arbeitsspeicher steht. Nur für Prüfungen — auf der
@@ -63,7 +72,11 @@ public struct FesterSchluessel: Schluesselquelle {
 /// auf.
 public final class Speicher {
 
-    public static let bundleId = "de.risiq.textschleuse"
+    public static let bundleId = "io.github.cookiemonster42.textschleuse"
+    /// Die Kennung vor dem Umzug ins persönliche GitHub-Konto. Nur für die
+    /// einmalige Übernahme des Bestands beim Start — siehe
+    /// `migriereAltenBestand()` und `Schluesselquelle.migriereAltenSchluessel()`.
+    public static let alteBundleId = "de.risiq.textschleuse"
     fileprivate static let schluesselKonto = "woerterbuch-schluessel"
 
     public let ordner: URL
@@ -77,6 +90,13 @@ public final class Speicher {
     public static var echterOrdner: URL {
         let basis = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return basis.appendingPathComponent(bundleId, isDirectory: true)
+    }
+
+    /// Wo der Bestand vor der Umstellung auf die neue Kennung lag. Nur zum
+    /// Nachschauen bei der Migration, niemals zum Schreiben.
+    public static var alterOrdner: URL {
+        let basis = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return basis.appendingPathComponent(alteBundleId, isDirectory: true)
     }
 
     public init(ordner: URL? = nil, schluesselquelle: Schluesselquelle = KeychainSchluessel()) {
@@ -170,6 +190,52 @@ public final class Speicher {
     /// Aufforderung zum Backup.
     public var hatDatei: Bool {
         FileManager.default.fileExists(atPath: datei.path)
+    }
+
+    // MARK: Migration von der alten Kennung
+
+    /// Übernimmt den Bestand aus dem festen alten Ordner (`Speicher.alterOrdner`).
+    /// Für Prüfungen mit zwei Wegwerfordnern siehe `migriere(von:)`.
+    @discardableResult
+    public func migriereAltenBestand() throws -> Bool {
+        try migriere(von: Self.alterOrdner)
+    }
+
+    /// Kopiert Wörterbuchdatei und Sicherungen aus `alterOrdner` her, wenn im
+    /// eigenen Ordner noch keine Datei liegt. Kopiert, nicht verschoben: der
+    /// alte Ordner bleibt unverändert, damit ein Zurück zur alten
+    /// Programmversion weiter funktioniert. Rückgabe: ob etwas übernommen
+    /// wurde.
+    @discardableResult
+    public func migriere(von alterOrdner: URL) throws -> Bool {
+        // Liegt hier schon etwas, hat das Vorrang — sonst würde ein
+        // gemischter Bestand (teils neu, teils migriert) entstehen.
+        guard !hatDatei else { return false }
+        let alteDatei = alterOrdner.appendingPathComponent("woerterbuch.dat")
+        guard FileManager.default.fileExists(atPath: alteDatei.path) else { return false }
+
+        try FileManager.default.createDirectory(at: ordner, withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: alteDatei, to: datei)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: datei.path)
+
+        let alterSicherungsordner = alterOrdner.appendingPathComponent("sicherungen", isDirectory: true)
+        let alteSicherungen = ((try? FileManager.default.contentsOfDirectory(
+            at: alterSicherungsordner,
+            includingPropertiesForKeys: nil
+        )) ?? []).filter { $0.pathExtension == "dat" }
+
+        if !alteSicherungen.isEmpty {
+            try FileManager.default.createDirectory(at: sicherungsordner, withIntermediateDirectories: true)
+            for quelle in alteSicherungen {
+                let ziel = sicherungsordner.appendingPathComponent(quelle.lastPathComponent)
+                // Kann eigentlich nicht vorkommen, da der eigene Ordner gerade
+                // erst angelegt wurde — trotzdem lieber übersprungen als mit
+                // einem Fehler abgebrochen.
+                guard !FileManager.default.fileExists(atPath: ziel.path) else { continue }
+                try FileManager.default.copyItem(at: quelle, to: ziel)
+            }
+        }
+        return true
     }
 
     // MARK: Sicherungen
@@ -271,6 +337,13 @@ public final class Speicher {
     private func schluesselHolenOderAnlegen() throws -> SymmetricKey {
         try schluesselquelle.schluessel()
     }
+
+    /// Reine Weiterleitung an die Schlüsselquelle — der Speicher selbst weiß
+    /// nichts von Kennungen im Schlüsselbund, nur die Schlüsselquelle tut das.
+    @discardableResult
+    public func migriereAltenSchluessel() throws -> Bool {
+        try schluesselquelle.migriereAltenSchluessel()
+    }
 }
 
 // MARK: - Keychain
@@ -353,6 +426,42 @@ public struct KeychainSchluessel: Schluesselquelle {
     public func vereinheitliche(auf schluessel: SymmetricKey) throws {
         SecItemDelete(Self.grundmuster as CFDictionary)
         try schreiben(schluessel)
+    }
+
+    /// Liest unter der alten Kennung `Speicher.alteBundleId` und legt den
+    /// Fund unter der neuen an, wenn dort noch keiner liegt. Der alte
+    /// Eintrag bleibt stehen, damit ein Zurück zur alten Programmversion
+    /// weiter funktioniert.
+    ///
+    /// Der alte Eintrag wurde von einer App mit einer anderen
+    /// Signatur-Kennung angelegt. macOS kann deshalb beim ersten Lesen
+    /// einmalig einen Schlüsselbund-Dialog zeigen. Das ist hinzunehmen.
+    @discardableResult
+    public func migriereAltenSchluessel() throws -> Bool {
+        guard try alleSchluessel().isEmpty else { return false }
+
+        let frage: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Speicher.alteBundleId,
+            kSecAttrAccount as String: Speicher.schluesselKonto,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+
+        var ergebnis: CFTypeRef?
+        let status = SecItemCopyMatching(frage as CFDictionary, &ergebnis)
+        switch status {
+        case errSecItemNotFound:
+            return false
+        case errSecSuccess:
+            break
+        default:
+            throw SpeicherFehler.schluesselNichtLesbar(status)
+        }
+        guard let daten = ergebnis as? Data, daten.count == 32 else { return false }
+
+        try schreiben(SymmetricKey(data: daten))
+        return true
     }
 
     /// Das Suchmuster ohne Wert und ohne Zugriffsliste. Beides gehört ins

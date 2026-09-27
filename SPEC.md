@@ -118,9 +118,14 @@ Popup gemeldet; das Kopieren wird nicht blockiert.
 
 ## Wörterbuch
 
-Gespeichert unter `~/Library/Application Support/de.risiq.textschleuse/`,
+Gespeichert unter `~/Library/Application Support/io.github.cookiemonster42.textschleuse/`,
 verschlüsselt, Schlüssel in der Keychain. Format ist JSON mit Schemaversion,
 damit spätere Programmversionen alte Dateien migrieren können.
+
+Die Bundle-Kennung war früher `de.risiq.textschleuse`. Beim ersten Start mit
+der neuen Kennung übernimmt die App Wörterbuch, Sicherungen und den
+Keychain-Schlüssel automatisch aus dem alten Ordner bzw. Dienstnamen — der
+alte Bestand bleibt dabei unverändert liegen.
 
 Regeltreffer wie IBAN oder E-Mail landen dauerhaft im Wörterbuch, aber in einer
 eigenen Sektion „automatisch erkannt", die sich mit einem Klick leeren lässt.
