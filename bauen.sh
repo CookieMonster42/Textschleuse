@@ -10,7 +10,7 @@ cd "$(dirname "$0")"
 KONFIGURATION=release
 BUNDLE=".build/Textschleuse.app"
 BUNDLE_ID="de.risiq.textschleuse"
-VERSION="0.5.1"
+VERSION="0.5.2"
 
 echo "→ Prüfungen"
 swift run --configuration "$KONFIGURATION" Pruefungen
@@ -49,7 +49,7 @@ cat > "$BUNDLE/Contents/Info.plist" <<PLIST
     <!-- Kein LSUIElement mehr: die App hat ein Fenster und ein Dock-Symbol.
          Wer nur die Menüleiste will, stellt das in den Einstellungen um;
          dann setzt die App die Aktivierungsart zur Laufzeit. -->
-    <key>NSHumanReadableCopyright</key>  <string>risiq intern</string>
+    <key>NSHumanReadableCopyright</key>  <string>Quelloffen, ohne Gewähr</string>
 </dict>
 </plist>
 PLIST
@@ -98,7 +98,7 @@ Prüfen, ob alles läuft
 
   /Applications/Textschleuse.app/Contents/MacOS/Textschleuse --selbsttest
 
-risiq intern
+Quelloffen, privat entwickelt, ohne Gewähr.
 HINWEIS
 
     hdiutil create \

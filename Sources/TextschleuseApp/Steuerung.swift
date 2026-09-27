@@ -397,15 +397,27 @@ final class Steuerung: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func zeigeUeber() {
         NSApp.activate(ignoringOtherApps: true)
         let meldung = NSAlert()
-        meldung.messageText = "Textschleuse"
-        meldung.informativeText = """
-            Ersetzt Namen, Adressen und Bankdaten durch Platzhalter, bevor der Text             in ein KI-Tool geht — und dreht die Antwort wieder zurück.
-
-            Alles bleibt auf diesem Rechner. Es geht nichts ins Netz.
-
-            risiq intern
-            """
+        meldung.messageText = "Textschleuse \(Self.version)"
+        meldung.informativeText = Self.ueberText
         meldung.runModal()
+    }
+
+    /// Die Versionsnummer der laufenden App, aus dem Bundle. Ohne Bundle
+    /// (etwa aus dem Build-Ordner heraus) steht da „Entwicklung".
+    static var version: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Entwicklung"
+    }
+
+    /// Der Text im Über-Dialog. Für sich, damit der Selbsttest ihn lesen kann.
+    static var ueberText: String {
+        """
+        Ersetzt Namen, Adressen und Bankdaten durch Platzhalter, bevor ein Text \
+        in ein KI-Tool geht — und dreht die Antwort wieder zurück.
+
+        Alles bleibt auf diesem Rechner. Es geht nichts ins Netz.
+
+        Version \(version). Quelloffen, privat entwickelt, ohne Gewähr.
+        """
     }
 
     // MARK: Schützen

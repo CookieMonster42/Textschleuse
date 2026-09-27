@@ -53,6 +53,7 @@ enum Selbsttest {
         fehler += pruefeChipOhnePolster()
         fehler += pruefeNormalesBearbeiten()
         fehler += pruefeTastenkuerzelBlatt()
+        fehler += pruefeUeberDialog()
         fehler += pruefeExport()
         fehler += pruefeErsetzen()
         fehler += pruefeEigenerTyp()
@@ -1963,7 +1964,7 @@ enum Selbsttest {
         }
 
         if let mitWebsite = gemeldet {
-            let gefunden = Schleuse.analysiere("Mehr auf www.risiq.de", woerterbuch: mitWebsite)
+            let gefunden = Schleuse.analysiere("Mehr auf www.beispiel-nord.de", woerterbuch: mitWebsite)
             if gefunden.aktiveFunde.contains(where: { $0.kategorie == .website }) {
                 print("✓ Typen: die Adresse wird sofort gefunden")
             } else {
@@ -2474,6 +2475,26 @@ enum Selbsttest {
         }
         print("✗ Chip: „\(chip)\" — danach kommt „\(danach)\" statt des Kommas")
         return 1
+    }
+
+    /// Der Über-Dialog nennt die Version der laufenden App und keinen
+    /// Firmennamen.
+    private static func pruefeUeberDialog() -> Int {
+        var fehler = 0
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        if let version, Steuerung.ueberText.contains("Version \(version)") {
+            print("✓ Über: nennt die Version \(version) aus dem Bundle")
+        } else {
+            print("✗ Über: Version fehlt (Bundle: \(version ?? "keine"), Text: \(Steuerung.ueberText.suffix(60)))")
+            fehler += 1
+        }
+        if !Steuerung.ueberText.lowercased().contains("risiq") {
+            print("✓ Über: kein Firmenname im Text")
+        } else {
+            print("✗ Über: da steht noch ein Firmenname")
+            fehler += 1
+        }
+        return fehler
     }
 
     private static func knoepfeSammeln(in ansicht: NSView) -> [NSButton] {
