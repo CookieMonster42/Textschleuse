@@ -1350,11 +1350,11 @@ Pruefstand.pruefe("Zusatzregeln: sind ab Werk aus") {
 }
 
 Pruefstand.pruefe("Zusatzregeln: Website") {
-    let treffer = mitRegel(.website, "Mehr auf https://beispielbank-nord.de/kredite und www.risiq.de.")
+    let treffer = mitRegel(.website, "Mehr auf https://beispielbank-nord.de/kredite und www.beispiel-nord.de.")
         .aktiveFunde.filter { $0.kategorie == .website }
     Pruefstand.gleich(treffer.count, 2, "beide Adressen")
     Pruefstand.gleich(treffer.first?.text, "https://beispielbank-nord.de/kredite", "mit Pfad")
-    Pruefstand.gleich(treffer.last?.text, "www.risiq.de", "der Satzpunkt gehört nicht dazu")
+    Pruefstand.gleich(treffer.last?.text, "www.beispiel-nord.de", "der Satzpunkt gehört nicht dazu")
 
     // Eine nackte Domain ist zu riskant: „z.B." und „Datei.pdf" sähen genauso aus.
     let nackt = mitRegel(.website, "Siehe beispielbank-nord.de oder Anlage.pdf")
@@ -1425,12 +1425,12 @@ Pruefstand.pruefe("Zusatzregeln: Kunden- und Vertragsnummer behalten ihr Etikett
 Pruefstand.pruefe("Zusatzregeln: Decknamen drehen sich zurück") {
     var buch = Woerterbuch()
     buch.schalte(.website, an: true)
-    let analyse = Schleuse.analysiere("Mehr auf www.risiq.de", woerterbuch: buch)
+    let analyse = Schleuse.analysiere("Mehr auf www.beispiel-nord.de", woerterbuch: buch)
     let geschuetzt = Schleuse.geschuetzterText(analyse)
     Pruefstand.enthaelt(geschuetzt, "WEBSITE_1", "bekommt einen eigenen Decknamen")
 
     let zurueck = Rueckweg.analysiere(geschuetzt, woerterbuch: analyse.woerterbuch)
-    Pruefstand.gleich(zurueck.ergebnis, "Mehr auf www.risiq.de", "und wieder zurück")
+    Pruefstand.gleich(zurueck.ergebnis, "Mehr auf www.beispiel-nord.de", "und wieder zurück")
 }
 
 Pruefstand.pruefe("Zusatzregeln: Ein- und Ausschalten übersteht das Speichern") {
