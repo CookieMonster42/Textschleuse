@@ -2,7 +2,10 @@
 # Baut Textschleuse.app. Kein Xcode nötig, die Command Line Tools reichen.
 #
 #   ./bauen.sh            baut nach .build/Textschleuse.app
-#   ./bauen.sh --install  baut und legt die App in /Applications ab
+#   ./bauen.sh --install  baut und legt die App in ~/Applications ab
+#   ./bauen.sh --dmg      baut dazu Textschleuse-$VERSION.dmg und Textschleuse.dmg
+#   ./bauen.sh --release  baut die DMGs und legt das GitHub-Release v$VERSION an
+#                         (oder lädt die DMGs an ein vorhandenes nach)
 #
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -61,10 +64,10 @@ echo "→ Signieren"
 codesign --force --sign - --identifier "$BUNDLE_ID" "$BUNDLE"
 codesign --verify --verbose "$BUNDLE" 2>&1 | sed 's/^/   /'
 
-if [[ "${1:-}" == "--dmg" ]]; then
+if [[ "${1:-}" == "--dmg" || "${1:-}" == "--release" ]]; then
     echo "→ DMG bauen"
     BUEHNE=".build/dmg-buehne"
-    rm -rf "$BUEHNE" ".build/Textschleuse-$VERSION.dmg"
+    rm -rf "$BUEHNE" ".build/Textschleuse-$VERSION.dmg" ".build/Textschleuse.dmg"
     mkdir -p "$BUEHNE"
     cp -R "$BUNDLE" "$BUEHNE/Textschleuse.app"
     # Verknüpfung, damit man die App im Fenster nach rechts ziehen kann.
@@ -107,8 +110,37 @@ HINWEIS
         -ov -format UDZO -quiet \
         ".build/Textschleuse-$VERSION.dmg"
     rm -rf "$BUEHNE"
+    # Dieselbe Datei noch einmal ohne Versionsnummer: unter diesem festen
+    # Namen zeigt .../releases/latest/download/Textschleuse.dmg immer auf
+    # die aktuelle Version. Die Website verlinkt genau darauf — der Name
+    # muss so bleiben.
+    cp ".build/Textschleuse-$VERSION.dmg" ".build/Textschleuse.dmg"
     echo "   $PWD/.build/Textschleuse-$VERSION.dmg"
+    echo "   $PWD/.build/Textschleuse.dmg"
     echo "   $(du -h ".build/Textschleuse-$VERSION.dmg" | cut -f1)"
+
+    if [[ "${1:-}" == "--release" ]]; then
+        echo "→ Release v$VERSION"
+        command -v gh >/dev/null || { echo "   gh fehlt (brew install gh)"; exit 1; }
+        DATEIEN=(".build/Textschleuse-$VERSION.dmg" ".build/Textschleuse.dmg")
+        if gh release view "v$VERSION" >/dev/null 2>&1; then
+            # Gibt es das Release schon, werden nur die Dateien ersetzt.
+            gh release upload "v$VERSION" "${DATEIEN[@]}" --clobber
+            echo "   Dateien an v$VERSION nachgeladen"
+        else
+            # Notizen aus einer Datei, wenn RELEASE_NOTIZEN darauf zeigt;
+            # sonst erzeugt GitHub sie aus den Pull Requests.
+            if [[ -n "${RELEASE_NOTIZEN:-}" && -f "$RELEASE_NOTIZEN" ]]; then
+                NOTIZEN=(--notes-file "$RELEASE_NOTIZEN")
+            else
+                NOTIZEN=(--generate-notes)
+            fi
+            gh release create "v$VERSION" "${DATEIEN[@]}" \
+                --target main --title "Textschleuse $VERSION" "${NOTIZEN[@]}"
+        fi
+        gh release view "v$VERSION" --json url --jq '.url' | sed 's/^/   /'
+        echo "   Direktlink: https://github.com/CookieMonster42/Textschleuse/releases/latest/download/Textschleuse.dmg"
+    fi
 elif [[ "${1:-}" == "--install" ]]; then
     # ~/Applications statt /Applications: dort braucht es keine
     # Administratorrechte, und Launchpad und Spotlight finden es genauso.

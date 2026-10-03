@@ -17,9 +17,10 @@ Kommt die Antwort zurück, werden die Platzhalter wieder zu den echten Namen.
 
 ## Herunterladen
 
-Die fertige App liegt unter **Releases** rechts auf dieser Seite als
-`Textschleuse-<Version>.dmg`. Voraussetzung: macOS 14 oder neuer auf Apple
-Silicon.
+**[Textschleuse für macOS laden](https://github.com/CookieMonster42/Textschleuse/releases/latest/download/Textschleuse.dmg)**
+— dieser Link zeigt immer auf die aktuelle Version. Ältere Versionen liegen
+unter **Releases** rechts auf dieser Seite als `Textschleuse-<Version>.dmg`.
+Voraussetzung: macOS 14 oder neuer auf Apple Silicon.
 
 1. DMG öffnen, `Textschleuse.app` auf „Programme" ziehen.
 2. Beim ersten Start: rechte Maustaste auf die App, dann „Öffnen", und im
@@ -56,7 +57,8 @@ Es braucht nur die Command Line Tools, kein Xcode.
 ```bash
 ./bauen.sh            # baut .build/Textschleuse.app, mit Prüfungen
 ./bauen.sh --install  # legt die App zusätzlich in ~/Applications ab
-./bauen.sh --dmg      # baut das DMG zum Weitergeben
+./bauen.sh --dmg      # baut Textschleuse-<Version>.dmg und Textschleuse.dmg
+./bauen.sh --release  # baut die DMGs und legt das GitHub-Release an
 ```
 
 Prüfen, ob auf einem Rechner alles läuft:
