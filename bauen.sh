@@ -21,12 +21,14 @@ BUNDLE_ID="io.github.cookiemonster42.textschleuse"
 #   SIGNIERUNG="Developer ID Application: Name (TEAMID)"   erzwingt eine Identität
 #   NOTAR_PROFIL=textschleuse                              Profil aus
 #       xcrun notarytool store-credentials textschleuse --apple-id … --team-id …
-# Getrennt zugewiesen, nicht in einem String verschachtelt: bash 3.2 von
-# macOS verschluckt sich an Anführungszeichen in einer Befehlssubstitution
-# innerhalb von Anführungszeichen.
+# Ohne Anführungszeichen im Muster: bash 3.2 von macOS zählt sie in einer
+# Befehlssubstitution mit und hält danach den Rest des Skripts für einen
+# String — der Fehler zeigt dann auf eine ganz andere Zeile.
 if [[ -z "${SIGNIERUNG:-}" ]]; then
+    # `|| true`: ohne Zertifikat findet grep nichts, und mit pipefail wäre
+    # das sonst das stille Ende des Skripts.
     SIGNIERUNG=$(security find-identity -v -p codesigning 2>/dev/null \
-        | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"')
+        | grep -o 'Developer ID Application: [^)]*)' | head -1 || true)
 fi
 NOTAR_PROFIL="${NOTAR_PROFIL:-textschleuse}"
 NOTARISIEREN=false
@@ -34,7 +36,7 @@ if [[ "$SIGNIERUNG" == Developer\ ID\ Application* ]]; then
     if security find-generic-password -s "com.apple.gke.notary.tool" -a "$NOTAR_PROFIL" >/dev/null 2>&1; then
         NOTARISIEREN=true
     else
-        echo "Hinweis: Developer-ID-Zertifikat da, aber kein notarytool-Profil „$NOTAR_PROFIL"."
+        echo "Hinweis: Developer-ID-Zertifikat da, aber kein notarytool-Profil „$NOTAR_PROFIL“."
         echo "         Einrichten mit: xcrun notarytool store-credentials $NOTAR_PROFIL --apple-id <Apple-ID> --team-id <TEAMID>"
         echo "         Es wird signiert, aber nicht notarisiert."
     fi
