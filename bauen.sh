@@ -32,9 +32,15 @@ if [[ -z "${SIGNIERUNG:-}" ]]; then
         | grep -o 'Developer ID Application: [^)]*)' | head -1 || true)
 fi
 NOTAR_PROFIL="${NOTAR_PROFIL:-textschleuse}"
+# Ob das Profil da ist, weiß nur notarytool selbst: es legt die Zugangsdaten
+# im Data-Protection-Schlüsselbund ab, wo `security` sie nicht findet. Die
+# Abfrage des Verlaufs prüft nebenbei, dass Apple die Zugangsdaten annimmt.
+hatNotarProfil() {
+    xcrun notarytool history --keychain-profile "$NOTAR_PROFIL" >/dev/null 2>&1
+}
 NOTARISIEREN=false
 if [[ "$SIGNIERUNG" == Developer\ ID\ Application* ]]; then
-    if security find-generic-password -s "com.apple.gke.notary.tool" -a "$NOTAR_PROFIL" >/dev/null 2>&1; then
+    if hatNotarProfil; then
         NOTARISIEREN=true
     else
         echo "Hinweis: Developer-ID-Zertifikat da, aber kein notarytool-Profil „$NOTAR_PROFIL“."
@@ -69,8 +75,8 @@ if [[ "${1:-}" == "--status" ]]; then
         echo "    Xcode › Einstellungen › Accounts › Manage Certificates › + › Developer ID Application"
         echo "    (braucht die bezahlte Mitgliedschaft im Apple Developer Program)"
     fi
-    if security find-generic-password -s "com.apple.gke.notary.tool" -a "$NOTAR_PROFIL" >/dev/null 2>&1; then
-        echo "  ✓ Notarisierungsprofil „$NOTAR_PROFIL“ im Schlüsselbund"
+    if hatNotarProfil; then
+        echo "  ✓ Notarisierungsprofil „$NOTAR_PROFIL“, Zugangsdaten von Apple bestätigt"
     else
         echo "  ✗ Kein Notarisierungsprofil „$NOTAR_PROFIL“."
         echo "    xcrun notarytool store-credentials $NOTAR_PROFIL --apple-id <Apple-ID> --team-id <TEAMID>"
