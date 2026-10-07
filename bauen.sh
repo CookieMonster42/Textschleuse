@@ -13,6 +13,48 @@ cd "$(dirname "$0")"
 KONFIGURATION=release
 BUNDLE=".build/Textschleuse.app"
 BUNDLE_ID="io.github.cookiemonster42.textschleuse"
+
+# Signatur. Liegt ein „Developer ID Application"-Zertifikat im Schlüsselbund,
+# wird damit signiert (Hardened Runtime, Zeitstempel) und die App samt DMG
+# bei Apple notarisiert — danach öffnet macOS sie per Doppelklick, ohne den
+# Rechtsklick-Umweg. Ohne Zertifikat bleibt es bei der Ad-hoc-Signatur.
+#   SIGNIERUNG="Developer ID Application: Name (TEAMID)"   erzwingt eine Identität
+#   NOTAR_PROFIL=textschleuse                              Profil aus
+#       xcrun notarytool store-credentials textschleuse --apple-id … --team-id …
+# Getrennt zugewiesen, nicht in einem String verschachtelt: bash 3.2 von
+# macOS verschluckt sich an Anführungszeichen in einer Befehlssubstitution
+# innerhalb von Anführungszeichen.
+if [[ -z "${SIGNIERUNG:-}" ]]; then
+    SIGNIERUNG=$(security find-identity -v -p codesigning 2>/dev/null \
+        | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"')
+fi
+NOTAR_PROFIL="${NOTAR_PROFIL:-textschleuse}"
+NOTARISIEREN=false
+if [[ "$SIGNIERUNG" == Developer\ ID\ Application* ]]; then
+    if security find-generic-password -s "com.apple.gke.notary.tool" -a "$NOTAR_PROFIL" >/dev/null 2>&1; then
+        NOTARISIEREN=true
+    else
+        echo "Hinweis: Developer-ID-Zertifikat da, aber kein notarytool-Profil „$NOTAR_PROFIL"."
+        echo "         Einrichten mit: xcrun notarytool store-credentials $NOTAR_PROFIL --apple-id <Apple-ID> --team-id <TEAMID>"
+        echo "         Es wird signiert, aber nicht notarisiert."
+    fi
+fi
+
+# Reicht eine Datei bei Apple ein und wartet auf das Urteil. Dauert meist ein
+# bis fünf Minuten. Bei Ablehnung steht das Protokoll im Terminal.
+notarisiere() {
+    echo "   Notarisierung: $(basename "$1") wird bei Apple eingereicht …"
+    local ausgabe
+    ausgabe=$(xcrun notarytool submit "$1" --keychain-profile "$NOTAR_PROFIL" --wait --timeout 30m 2>&1) || true
+    echo "$ausgabe" | sed 's/^/   /'
+    if ! echo "$ausgabe" | grep -q "status: Accepted"; then
+        local kennung
+        kennung=$(echo "$ausgabe" | grep -o 'id: [0-9a-f-]*' | head -1 | cut -d' ' -f2)
+        [[ -n "$kennung" ]] && xcrun notarytool log "$kennung" --keychain-profile "$NOTAR_PROFIL" | sed 's/^/   /'
+        echo "✗ Notarisierung abgelehnt"
+        exit 1
+    fi
+}
 VERSION="0.6.2"
 
 echo "→ Prüfungen"
@@ -57,12 +99,32 @@ cat > "$BUNDLE/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Ad-hoc-Signatur. Ohne sie verweigert die Keychain den Zugriff auf den
-# Schlüssel, und macOS fragt bei jedem Start neu nach der Berechtigung für
-# die globalen Tastenkürzel.
 echo "→ Signieren"
-codesign --force --sign - --identifier "$BUNDLE_ID" "$BUNDLE"
-codesign --verify --verbose "$BUNDLE" 2>&1 | sed 's/^/   /'
+if [[ -n "$SIGNIERUNG" ]]; then
+    # Hardened Runtime und Zeitstempel verlangt die Notarisierung. Die App
+    # braucht keine Ausnahmen: kein JIT, keine fremden Bibliotheken.
+    echo "   mit: $SIGNIERUNG"
+    codesign --force --options runtime --timestamp \
+        --sign "$SIGNIERUNG" --identifier "$BUNDLE_ID" "$BUNDLE"
+else
+    # Ad-hoc-Signatur. Ohne sie verweigert die Keychain den Zugriff auf den
+    # Schlüssel, und macOS fragt bei jedem Start neu nach der Berechtigung
+    # für die globalen Tastenkürzel.
+    echo "   ad hoc (kein Developer-ID-Zertifikat im Schlüsselbund)"
+    codesign --force --sign - --identifier "$BUNDLE_ID" "$BUNDLE"
+fi
+codesign --verify --strict --verbose "$BUNDLE" 2>&1 | sed 's/^/   /'
+
+if [[ "$NOTARISIEREN" == true ]]; then
+    echo "→ App notarisieren"
+    # Als Zip einreichen, danach das Ticket an die App heften. So öffnet sie
+    # auch dann, wenn der Rechner beim ersten Start gerade offline ist.
+    rm -f ".build/Textschleuse.zip"
+    ditto -c -k --keepParent "$BUNDLE" ".build/Textschleuse.zip"
+    notarisiere ".build/Textschleuse.zip"
+    xcrun stapler staple "$BUNDLE" | sed 's/^/   /'
+    spctl --assess --type execute --verbose=2 "$BUNDLE" 2>&1 | sed 's/^/   /'
+fi
 
 if [[ "${1:-}" == "--dmg" || "${1:-}" == "--release" ]]; then
     echo "→ DMG bauen"
@@ -73,18 +135,27 @@ if [[ "${1:-}" == "--dmg" || "${1:-}" == "--release" ]]; then
     # Verknüpfung, damit man die App im Fenster nach rechts ziehen kann.
     ln -s /Applications "$BUEHNE/Programme"
 
-    cat > "$BUEHNE/Bitte lesen.txt" <<'HINWEIS'
-Textschleuse — Installation
-
-1. Textschleuse.app auf "Programme" ziehen.
-2. Beim ersten Start: rechte Maustaste auf die App, dann "Öffnen".
-   Danach im Dialog noch einmal "Öffnen" bestätigen.
+    if [[ "$NOTARISIEREN" == true ]]; then
+        OEFFNEN_HINWEIS='1. Textschleuse.app auf "Programme" ziehen.
+2. Doppelklick. Die App ist signiert und bei Apple notarisiert.'
+    else
+        OEFFNEN_HINWEIS='1. Textschleuse.app auf "Programme" ziehen.
+2. Doppelklick. macOS meldet, die App könne nicht geöffnet werden.
+   Die Meldung mit "Fertig" schließen.
+3. Systemeinstellungen > Datenschutz & Sicherheit öffnen, nach unten
+   rollen: dort steht "Textschleuse wurde blockiert" mit dem Knopf
+   "Dennoch öffnen". Klicken, bestätigen. Das ist nur einmal nötig.
+   (Bis macOS 14 reicht stattdessen Rechtsklick auf die App > "Öffnen".)
 
 Warum der Umweg beim ersten Start?
 
-Die App ist nicht bei Apple registriert (keine Notarisierung). macOS
-blockiert sie deshalb beim Doppelklick. Der Rechtsklick-Weg ist die von
-Apple vorgesehene Ausnahme und ist nur einmal nötig.
+Diese Ausgabe ist nicht bei Apple notarisiert. macOS lässt eine
+heruntergeladene App ohne Notarisierung nur über diesen Weg zu.'
+    fi
+    cat > "$BUEHNE/Bitte lesen.txt" <<HINWEIS
+Textschleuse — Installation
+
+$OEFFNEN_HINWEIS
 
 Was die App macht
 
@@ -110,6 +181,17 @@ HINWEIS
         -ov -format UDZO -quiet \
         ".build/Textschleuse-$VERSION.dmg"
     rm -rf "$BUEHNE"
+
+    if [[ "$NOTARISIEREN" == true ]]; then
+        echo "→ DMG signieren und notarisieren"
+        # Auch das Abbild selbst: ein heruntergeladenes DMG prüft macOS
+        # eigenständig, nicht nur die App darin.
+        codesign --force --timestamp --sign "$SIGNIERUNG" ".build/Textschleuse-$VERSION.dmg"
+        notarisiere ".build/Textschleuse-$VERSION.dmg"
+        xcrun stapler staple ".build/Textschleuse-$VERSION.dmg" | sed 's/^/   /'
+        spctl --assess --type open --context context:primary-signature --verbose=2 \
+            ".build/Textschleuse-$VERSION.dmg" 2>&1 | sed 's/^/   /'
+    fi
     # Dieselbe Datei noch einmal ohne Versionsnummer: unter diesem festen
     # Namen zeigt .../releases/latest/download/Textschleuse.dmg immer auf
     # die aktuelle Version. Die Website verlinkt genau darauf — der Name
