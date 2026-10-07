@@ -6,6 +6,7 @@
 #   ./bauen.sh --dmg      baut dazu Textschleuse-$VERSION.dmg und Textschleuse.dmg
 #   ./bauen.sh --release  baut die DMGs und legt das GitHub-Release v$VERSION an
 #                         (oder lädt die DMGs an ein vorhandenes nach)
+#   ./bauen.sh --status   zeigt, ob Zertifikat und Notarisierungsprofil da sind
 #
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -58,6 +59,30 @@ notarisiere() {
     fi
 }
 VERSION="0.6.2"
+
+if [[ "${1:-}" == "--status" ]]; then
+    echo "Signatur und Notarisierung"
+    if [[ -n "$SIGNIERUNG" ]]; then
+        echo "  ✓ Zertifikat: $SIGNIERUNG"
+    else
+        echo "  ✗ Kein Zertifikat „Developer ID Application“ im Schlüsselbund."
+        echo "    Xcode › Einstellungen › Accounts › Manage Certificates › + › Developer ID Application"
+        echo "    (braucht die bezahlte Mitgliedschaft im Apple Developer Program)"
+    fi
+    if security find-generic-password -s "com.apple.gke.notary.tool" -a "$NOTAR_PROFIL" >/dev/null 2>&1; then
+        echo "  ✓ Notarisierungsprofil „$NOTAR_PROFIL“ im Schlüsselbund"
+    else
+        echo "  ✗ Kein Notarisierungsprofil „$NOTAR_PROFIL“."
+        echo "    xcrun notarytool store-credentials $NOTAR_PROFIL --apple-id <Apple-ID> --team-id <TEAMID>"
+        echo "    (mit einem app-spezifischen Passwort von appleid.apple.com)"
+    fi
+    if [[ "$NOTARISIEREN" == true ]]; then
+        echo "  → ./bauen.sh --release signiert und notarisiert."
+    else
+        echo "  → ./bauen.sh --release baut ad hoc; die App braucht beim ersten Start den Umweg über die Systemeinstellungen."
+    fi
+    exit 0
+fi
 
 echo "→ Prüfungen"
 swift run --configuration "$KONFIGURATION" Pruefungen
