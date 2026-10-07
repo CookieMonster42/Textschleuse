@@ -23,9 +23,12 @@ unter **Releases** rechts auf dieser Seite als `Textschleuse-<Version>.dmg`.
 Voraussetzung: macOS 14 oder neuer auf Apple Silicon.
 
 1. DMG öffnen, `Textschleuse.app` auf „Programme" ziehen.
-2. Beim ersten Start: rechte Maustaste auf die App, dann „Öffnen", und im
-   Dialog noch einmal „Öffnen" bestätigen. Das ist nur einmal nötig — die App
-   ist nicht bei Apple notarisiert, deshalb blockiert macOS den Doppelklick.
+2. Beim ersten Start meldet macOS, die App könne nicht geöffnet werden.
+   Meldung schließen, dann Systemeinstellungen › Datenschutz & Sicherheit,
+   unten „Dennoch öffnen" klicken und bestätigen. Das ist nur einmal nötig.
+   (Bis macOS 14 reicht Rechtsklick auf die App › „Öffnen".) Der Grund: Die
+   Ausgabe ist noch nicht bei Apple notarisiert, siehe
+   [Signieren und notarisieren](#signieren-und-notarisieren).
 3. Die App zeigt ein Fenster und ein Symbol in der Menüleiste. Kurzbefehle:
    `⌃⌥⌘S` schützt die Zwischenablage, `⌃⌥⌘R` dreht sie zurück.
 
@@ -66,6 +69,27 @@ Prüfen, ob auf einem Rechner alles läuft:
 ```bash
 /Applications/Textschleuse.app/Contents/MacOS/Textschleuse --selbsttest
 ```
+
+### Signieren und notarisieren
+
+Liegt ein Zertifikat „Developer ID Application" im Schlüsselbund, signiert
+`bauen.sh` damit (Hardened Runtime, Zeitstempel) und reicht App und DMG zur
+Notarisierung bei Apple ein. Eine so gebaute Ausgabe öffnet macOS per
+Doppelklick, ohne den Rechtsklick-Umweg. Dafür einmalig:
+
+1. Mitgliedschaft im Apple Developer Program (kostenpflichtig; das kostenlose
+   Konto stellt kein Developer-ID-Zertifikat aus).
+2. In Xcode unter Einstellungen › Accounts › Manage Certificates ein
+   „Developer ID Application"-Zertifikat anlegen.
+3. Zugangsdaten für die Notarisierung im Schlüsselbund ablegen — mit einem
+   app-spezifischen Passwort der Apple-ID:
+
+   ```bash
+   xcrun notarytool store-credentials textschleuse --apple-id <Apple-ID> --team-id <TEAMID>
+   ```
+
+Danach erledigt `./bauen.sh --release` alles Weitere. Ohne Zertifikat bleibt
+es bei der Ad-hoc-Signatur und dem Hinweis zum ersten Start.
 
 Die Spezifikation steht in [SPEC.md](SPEC.md).
 
