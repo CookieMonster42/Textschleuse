@@ -64,7 +64,7 @@ notarisiere() {
         exit 1
     fi
 }
-VERSION="0.6.2"
+VERSION="0.7"
 
 if [[ "${1:-}" == "--status" ]]; then
     echo "Signatur und Notarisierung"
