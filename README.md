@@ -23,12 +23,10 @@ unter **Releases** rechts auf dieser Seite als `Textschleuse-<Version>.dmg`.
 Voraussetzung: macOS 14 oder neuer auf Apple Silicon.
 
 1. DMG öffnen, `Textschleuse.app` auf „Programme" ziehen.
-2. Beim ersten Start meldet macOS, die App könne nicht geöffnet werden.
-   Meldung schließen, dann Systemeinstellungen › Datenschutz & Sicherheit,
-   unten „Dennoch öffnen" klicken und bestätigen. Das ist nur einmal nötig.
-   (Bis macOS 14 reicht Rechtsklick auf die App › „Öffnen".) Der Grund: Die
-   Ausgabe ist noch nicht bei Apple notarisiert, siehe
-   [Signieren und notarisieren](#signieren-und-notarisieren).
+2. Doppelklick. Ab Version 0.7 ist die App mit Developer ID signiert und bei
+   Apple notarisiert; macOS öffnet sie ohne Rückfrage. (Ältere Versionen
+   brauchten den Umweg über Systemeinstellungen › Datenschutz & Sicherheit ›
+   „Dennoch öffnen".)
 3. Die App zeigt ein Fenster und ein Symbol in der Menüleiste. Kurzbefehle:
    `⌃⌥⌘S` schützt die Zwischenablage, `⌃⌥⌘R` dreht sie zurück.
 
